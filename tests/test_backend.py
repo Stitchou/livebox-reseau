@@ -60,7 +60,7 @@ async def main():
     assert await m.async_setup_entry(hass,None)
     m.websocket_get(hass,conn,{'id':1});assert conn.last['overrides']=={}
     m.websocket_subscribe(hass,conn,{'id':2});assert len(conn.subscriptions)==1
-    await m.websocket_set(hass,conn,{'id':3,'type':'livebox_reseau/set','key':'mac:AB','props':{'name':'Salon','parent':'device_tracker.velop_rdc','link':'wifi'}})
+    await m.websocket_set(hass,conn,{'id':3,'type':'livebox_reseau/set','key':'mac:AB','props':{'name':'Salon','parent':'device_tracker.point_acces_a','link':'wifi'}})
     assert conn.last['revision']==1 and conn.last['overrides']['mac:AB']['name']=='Salon'
     assert conn.messages[-1]['event']['revision']==1
     await m.websocket_set(hass,conn,{'id':4,'type':'livebox_reseau/set','key':'mac:CD','props':{'hidden':True}})
@@ -72,8 +72,8 @@ async def main():
     assert conn.last['revision']==3
     await m.websocket_set(hass,conn,{'id':7,'type':'livebox_reseau/set','key':'mac:XX','props':{'link':['wifi']}})
     assert conn.errors[-1][0]=='invalid_format'
-    await m.websocket_import(hass,conn,{'id':8,'type':'livebox_reseau/import','overrides':{'mac:AA':{'name':'Velop RDC'}}})
-    assert conn.last['overrides']['mac:AA']['name']=='Velop RDC' and conn.last['revision']==4
+    await m.websocket_import(hass,conn,{'id':8,'type':'livebox_reseau/import','overrides':{'mac:AA':{'name':'Borne WiFi A'}}})
+    assert conn.last['overrides']['mac:AA']['name']=='Borne WiFi A' and conn.last['revision']==4
     assert await m.async_unload_entry(hass,None)
     assert await m.async_setup_entry(hass,None)
     # Topologie : même client Orange que l'intégration existante, un seul appel
@@ -85,9 +85,9 @@ async def main():
             assert params == {'Timeout':30,'LLTDIcon':False,'SendXmlFile':False}
             return {'status':[{'Key':'livebox','Name':'Livebox 7','Children':[
                 {'Key':'switch','Name':'Switch','Children':[
-                    {'Key':'ha','Name':'HA','PhysAddress':'48:0F:CF:57:8E:2C'}]},
-                {'Key':'cpl','Name':'CPL Spare1','Children':[
-                    {'Key':'shelly','Name':'Shelly','PhysAddress':'AA:BB:CC:DD:EE:FF'}]}
+                    {'Key':'ha','Name':'HA','PhysAddress':'02:00:00:00:00:01'}]},
+                {'Key':'cpl','Name':'CPL secondaire','Children':[
+                    {'Key':'shelly','Name':'Capteur A','PhysAddress':'AA:BB:CC:DD:EE:FF'}]}
             ]}]}
     topo_api=TopologyAPI()
     coordinator=types.SimpleNamespace(api=types.SimpleNamespace(topologydiagnostics=topo_api))
@@ -99,8 +99,8 @@ async def main():
     await m.websocket_topology(hass,conn,{'id':23,'type':'livebox_reseau/topology'})
     assert topo_api.calls==1, 'Cache 15 minutes non appliqué'
     assert 'overrides' not in conn.last
-    assert hass.data['livebox_reseau']['overrides']['mac:AA']['name']=='Velop RDC'
+    assert hass.data['livebox_reseau']['overrides']['mac:AA']['name']=='Borne WiFi A'
     m.websocket_get(hass,conn,{'id':9})
-    assert conn.last['overrides']['mac:AA']['name']=='Velop RDC' and conn.last['revision']==4
+    assert conn.last['overrides']['mac:AA']['name']=='Borne WiFi A' and conn.last['revision']==4
     print('BACKEND_TESTS_OK: commandes, ressource HA, persistance + diffusion simulées')
 asyncio.run(main())

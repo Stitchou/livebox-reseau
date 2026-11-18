@@ -1,152 +1,106 @@
-# Livebox Réseau — carte de topologie pour Home Assistant
+# Livebox Réseau — topologie dans Home Assistant
 
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-int%C3%A9gration%20personnalis%C3%A9e-41BDF5)](https://www.home-assistant.io/)
 [![HACS](https://img.shields.io/badge/HACS-d%C3%A9p%C3%B4t%20personnalis%C3%A9-41BDF5)](https://www.hacs.xyz/)
-![Statut : développement](https://img.shields.io/badge/statut-d%C3%A9veloppement-orange)
+![Statut](https://img.shields.io/badge/statut-d%C3%A9veloppement-orange)
 
-**Version de développement 0.5.0 — non validée sur une Livebox réelle pour l'import complet de topologie.**
+**Version de développement 0.6.0 — ni stable ni validée sur toutes les configurations de Livebox 7.**
 
-Livebox Réseau ajoute une **carte graphique Lovelace** à Home Assistant. Elle présente les appareils remontés par l'intégration **Orange Livebox**, avec leurs noms, adresses IP, états de connexion et interfaces réseau. Depuis la 0.5.0, elle **essaie également d'importer les relations parent/enfant** fournies par le diagnostic de topologie de la Livebox.
+Cette intégration fournit une **carte Lovelace** pour représenter les équipements réseau visibles dans Home Assistant. Elle affiche les interfaces de la Livebox, les équipements intermédiaires reconnus et leurs enfants lorsque des liens sont disponibles. Les appareils sont organisés automatiquement : **pas de placement manuel des bulles**.
 
-Ce projet **n'est pas une reproduction exacte** de la carte « Mon Réseau Local » d'Orange. Il ne découvre pas lui-même les appareils en scannant le réseau et ne peut pas garantir la justesse de leurs connexions physiques. **Les points d’accès Linksys Velop de l’installation de référence sont configurés en mode pont (bridge/AP), pas en mode routeur.**
+## Aperçu (noms entièrement fictifs)
 
-## Dépendance indispensable : Orange Livebox
+![Capture de démonstration fictive de Livebox Réseau, interfaces ETH0 à ETH4 ouvertes, switch, points d'accès Wi-Fi et sous-branches CPL](assets/topologie-exemple-fictif.png)
 
-Ce projet nécessite l'intégration Home Assistant **[Orange Livebox (`cyr-ius/hass-livebox-component`)](https://github.com/cyr-ius/hass-livebox-component)**, **installée, configurée et fonctionnelle**.
+*Capture du rendu de la carte v0.6.0 dans un navigateur de test, alimentée par **21 appareils et une arborescence `Children` simulés**. Tous les noms sont génériques (« NAS », « PC », « CPL maître », « CPL secondaire », « Capteur jardin »…), toutes les adresses sont réservées à la documentation (`192.0.2.0/24`). **Aucune donnée provenant d'un réseau personnel n'est utilisée.** Les liens CPL et Wi-Fi illustrés sont fictifs ; ils ne sont pas une preuve de branchements réels.*
 
-Elle fournit :
+Sur PC, **toutes les interfaces sont déployées au départ**. Sur téléphone, les interfaces sont **repliées au départ** pour limiter le défilement. Les boutons **Tout déployer** et **Tout replier** permettent de modifier cet affichage ; les branches restent consultables individuellement.
 
-- les entités `device_tracker` utilisées pour afficher les appareils, leurs noms et leur présence ;
-- les attributs réseau tels que `ip`, `mac`, `interface_name`, `connection` et `frequency_band`, lorsqu'ils existent ;
-- une connexion déjà authentifiée à la Livebox, dont Livebox Réseau tente de réutiliser l'API `TopologyDiagnostics`.
+## Dépendance obligatoire
 
-**L'intégration Orange doit être installée séparément.** Installer *Livebox Réseau* via HACS **n'installe pas automatiquement** `cyr-ius/hass-livebox-component`. La compatibilité de l'appel de diagnostic dépend de la version de cette intégration et du firmware de la box ; elle n'est pas garantie.
+L'intégration externe **[Orange Livebox pour Home Assistant, par cyr-ius (`cyr-ius/hass-livebox-component`)](https://github.com/cyr-ius/hass-livebox-component)** doit déjà être **installée, configurée et fonctionnelle**.
 
-Dans les options d'Orange Livebox, activez le **suivi Wi-Fi** et le **suivi filaire**. Les entités `device_tracker` nécessaires doivent aussi être **activées** dans Home Assistant. Si elles n'apparaissent pas immédiatement, laissez l'intégration actualiser les états. Le projet ne dépend pas des traceurs GPS des téléphones.
+Cette dépendance n'est **pas installée automatiquement** par HACS avec Livebox Réseau. Il faut activer le **suivi filaire et Wi-Fi**, ainsi que les entités `device_tracker` correspondantes dans Home Assistant. Ces entités fournissent les noms, les états et certains attributs (`ip`, `mac`, `interface_name`, `connection`, `frequency_band`). La carte écarte les traceurs GPS. Il est possible que certains attributs manquent pour un appareil.
 
-## Fonctionnalités réellement présentes en 0.5.0
+Pour importer les liens, le composant cherche à réutiliser la session authentifiée de cette intégration Orange et son API interne `TopologyDiagnostics`. **La compatibilité dépend de la version installée de l'intégration Orange et du firmware Livebox.**
 
-| Fonction | Comportement actuel |
+## Fonctionnalités de la version 0.6.0
+
+| Fonction | Comportement réel |
 | --- | --- |
-| Inventaire réseau | Lit les `device_tracker` disponibles dans les états HA dont `source_type` vaut `router` et qui disposent d'informations d'interface/connexion. Le filtrage ne vérifie pas formellement l'identité de l'intégration source. |
-| Noms, IP, MAC, présence | Utilise les attributs fournis par HA ; `home` est traité comme « en ligne ». L'IP ou la MAC peuvent manquer. |
-| Carte graphique | Affiche la Livebox et des branches par interface (`ETH0`, `ETH1`, etc. ou Wi-Fi), puis les appareils. Les branches sont ouvrables et le graphe possède zoom, déplacement, recherche et filtres. |
-| Topologie Livebox (nouveauté 0.5.0) | Tente l'appel `TopologyDiagnostics` via la connexion de l'intégration Orange. Convertit la réponse `Children` en nœuds avec relations de parenté. |
-| Rattachement automatique | Associe les nœuds aux appareils HA par **adresse MAC** et ne conserve un lien importé que si sa branche est cohérente avec le groupe d'interface connu. |
-| Switchs, ponts, CPL | Peut représenter des nœuds intermédiaires **présents dans la réponse Livebox**, identifiés par leur nom ou leurs marqueurs. Ce n'est pas une identification matérielle certaine. |
-| Velop RDC (mode pont) | Si `auto_velop_rdc` est activé et que « Velop RDC » est présent sous `ETH2`, la carte place **les autres appareils du même groupe ETH2** sous lui. Le code marque ces liens comme Wi-Fi, **sur la base d'une règle propre à cette installation** : il ne lit pas la liste réelle des stations associées au Velop. |
-| Velop Garage (mode pont) | Si `auto_velop_garage` est activé et que « Velop Garage » est détecté, la carte place sous lui les noms **explicitement prévus dans le code** (Titan, Titan 2, Alexa bureau, congélateur, pompe piscine) lorsqu'ils sont dans le même groupe d'interface. Il s'agit de rattachements indiqués par l'utilisateur, **pas d'une découverte des clients Wi-Fi par l'API Livebox**. |
-| Corrections individuelles | Depuis un appareil dans la carte : nom affiché, branche, parent, type de liaison, masquage. Les réglages saisis priment sur les liens importés. |
-| Synchronisation PC / mobile | Enregistre les corrections via WebSocket dans le stockage interne de Home Assistant et transmet les modifications aux cartes ouvertes. Pas d'export YAML après chaque modification. |
-| Éditeur visuel | Permet de modifier le titre, le nom et l'IP affichés du routeur, ainsi que l'activation des deux règles Velop. La correction des appareils se fait dans le graphe, pas dans cet éditeur. |
-| Diagnostic | Produit un JSON à copier avec identifiants remplacés par `N1`, `N2`…, **sans IP ni MAC**, mais en conservant les noms, types, marqueurs et relations. |
+| Inventaire | Lit les `device_tracker` Home Assistant possédant `source_type: router` et les attributs réseau attendus. Le code ne vérifie pas formellement l'intégration d'origine de chaque tracker. |
+| État des appareils | Affiche le nom, l'IP quand elle est connue et le statut `home` / `not_home`. |
+| Topologie automatique | Tente d'extraire les relations `Children` de `TopologyDiagnostics`, puis rapproche les équipements des trackers par **MAC** et cohérence de branche. Les intermédiaires inconnus ne sont pas inventés par un simple scan IP. |
+| Présentation | Livebox → interfaces ETH/Wi-Fi → équipements et sous-branches ; compactes, sans traits libres qui se chevauchent. Tous les ETH peuvent être ouverts simultanément. |
+| Switchs / CPL / points d'accès | Peuvent apparaître comme **nœuds parents** lorsqu'ils sont présents dans les données et qu'un lien exploitable est reconnu. La reconnaissance matérielle n'est pas garantie. |
+| Navigation | Recherche, filtres, clic sur un appareil, **Tout déployer / Tout replier**, affichage adapté au téléphone. Il n'y a **pas de déplacement individuel des bulles** ni de zoom global dans cette nouvelle présentation. |
+| Personnalisation | Possibilité de corriger le nom, l'interface, le parent, le type de liaison ou de masquer un équipement, depuis sa fiche dans la carte. Les corrections passent avant les liens importés. |
+| Stockage PC / mobile | Corrections enregistrées côté Home Assistant, dans `.storage/livebox_reseau_map`, puis partagées par WebSocket entre les écrans connectés. Aucun export YAML n'est requis après chaque correction. |
+| Éditeur Lovelace | Éditeur visuel pour le titre, le nom/IP affichés du routeur et les options de regroupement héritées des versions précédentes. |
+| Diagnostic | JSON à copier présentant les relations parent/enfant, en remplaçant les identifiants par `N1`, `N2`… et en retirant les IP et MAC. **Les noms des appareils restent visibles dans le diagnostic.** |
 
-### Ce que la carte ne fait pas
+### Les liens ne sont pas tous équivalents
 
-- Elle **n'importe pas le dessin ni les coordonnées** de la carte Orange ; elle reconstruit sa propre disposition graphique.
-- Elle ne connaît pas forcément le point d'accès Wi-Fi réel derrière un faux « Switch » de la Livebox, notamment pour les **Linksys Velop en mode pont**. Les clients associés en Wi-Fi peuvent être signalés sur une interface `ETHx` comme des appareils du même segment Ethernet.
-- Elle ne vérifie pas physiquement les liens Ethernet ou CPL et ne distingue pas toujours les équipements derrière un switch non administrable.
-- Elle ne récupère pas automatiquement les noms d'appareils qui n'existent pas dans les entités HA disponibles et ne scanne pas le sous-réseau par ARP, ping ou SNMP.
-- Elle **n'ajoute pas de capteurs ou de nouvelles statistiques** à Recorder. Elle n'envoie pas les données réseau à un service cloud tiers.
+- **Interface ETH / Wi-Fi** : interface indiquée par la Livebox. Cela ne prouve **pas** un câble direct.
+- **`Children`** : relation déclarée par le diagnostic de la Livebox, pas une vérification physique indépendante.
+- **Règle locale Velop / correction manuelle** : rattachement appliqué localement, à distinguer d'un lien réellement fourni par Orange.
+- **CPL** : une sous-branche peut être affichée si la relation est présente ou corrigée. Le programme ne détecte pas directement le chemin électrique des adaptateurs CPL.
 
-## Cas particulier : Linksys Velop en mode pont
+Les points d'accès **Linksys Velop en mode pont** peuvent être représentés par Orange comme de faux switchs : la carte n'est **pas capable de retrouver avec certitude** le point d'accès Wi-Fi réel de chaque appareil à partir des seules interfaces ETH. Les règles locales héritées des versions précédentes sont spécifiques à certaines configurations et ne doivent pas être assimilées à une découverte universelle.
 
-Dans l'installation de référence, **Velop RDC** et **Velop Garage** fonctionnent en **mode pont** (*Bridge Mode / mode point d'accès*), et non comme routeurs distincts. Les clients Wi-Fi de ces bornes se trouvent donc sur le **même réseau local** que la Livebox, qui continue de fournir la connectivité IP du LAN. Ils ne forment pas un sous-réseau routé séparé par les Velop.
+## Installation HACS
 
-Cela a une conséquence directe pour la topologie : la Livebox peut voir un ensemble d'appareils derrière un même port `ETHx` ou un **nœud « Switch » générique**, sans savoir quelle station Wi-Fi est associée à quelle borne Velop. Un port `ETHx` ne permet **pas** de conclure que l'appareil est câblé, ni d'identifier son point d'accès sans autre donnée.
+1. Installez et configurez d'abord **[Orange Livebox de cyr-ius](https://github.com/cyr-ius/hass-livebox-component)**.
+2. Dans HACS, ajoutez `https://github.com/Stitchou/livebox-reseau` comme **dépôt personnalisé**, catégorie **Intégration**, puis installez Livebox Réseau.
+3. Redémarrez **Home Assistant Core** (y compris après la première installation, même si HACS n'affiche pas ce bouton).
+4. Dans **Paramètres → Appareils et services → Ajouter une intégration**, ajoutez **Livebox Réseau**. Aucun identifiant Livebox supplémentaire n'est demandé.
+5. Dans **Paramètres → Tableaux de bord → Ressources**, vérifiez qu'une ressource de type **Module JavaScript** pointe vers `/livebox-reseau/livebox-topologie-card.js?v=0.6.0`. Le composant tente de la créer automatiquement en mode de ressources Lovelace « stockage » ; ajoutez-la manuellement si nécessaire.
+6. Actualisez le navigateur (`Ctrl + Maj + R` dans Firefox), puis ajoutez la carte au tableau de bord.
 
-Dans la version **0.5.0**, les deux regroupements Velop sont donc des **règles locales optionnelles** fondées sur la connaissance de l'installation :
-
-- **Velop RDC :** sous `ETH2`, les autres appareils de ce groupe sont rattachés à Velop RDC lorsque `auto_velop_rdc` est activé.
-- **Velop Garage :** les appareils explicitement nommés dans la règle sont rattachés à Velop Garage lorsqu'ils sont dans la même branche et que `auto_velop_garage` est activé.
-
-Ces règles **ne détectent pas automatiquement les associations Wi-Fi en cours** et peuvent devenir inexactes si un appareil change de borne, si la Livebox modifie son classement ou si un autre appareil filaire partage la branche. La carte conserve les corrections manuelles prioritaires. Les relations du **switch Mercusys** et des **CPL** peuvent être reprises de `Children` lorsqu'elles sont présentes et compatibles, mais elles ne sont pas considérées comme physiquement vérifiées.
-
-## Fonctionnement de l'import de topologie
-
-1. Le composant Python cherche une instance chargée de l'intégration Home Assistant `livebox` dont le coordinateur expose une API.
-2. Il appelle `topologydiagnostics.async_set_topodiags_build` avec une demande de diagnostic, **sans reconfigurer la Livebox**.
-3. Il extrait les éléments `Children`, leurs parents, certains noms, MAC et marqueurs ; le résultat est limité en taille et ne contient pas la réponse brute de la box.
-4. La carte rapproche cette structure des `device_tracker` **par MAC**, puis n'affiche que les liens compatibles avec les interfaces connues. Les équipements sans correspondance sûre peuvent rester rattachés à leur branche ETH/Wi-Fi.
-5. Les corrections manuelles et les règles Velop ont priorité sur les liens déduits.
-
-**Important :** `ETH2` signifie « interface ETH2 déclarée par la Livebox » et **pas nécessairement un câble direct** entre la box et chaque appareil. Dans cette installation, des clients des **Velop configurés en pont** apparaissent justement derrière des interfaces Ethernet. Un nœud nommé « Switch » dans `TopologyDiagnostics` peut donc être un regroupement générique créé par Orange, et non un véritable switch identifié.
-
-La topologie est **mise en cache 15 minutes en mémoire**. Le bouton **« ↻ Topologie Livebox »** relance la demande depuis la carte, **mais ne force pas la suppression de ce cache** : avant son expiration, il peut afficher la même réponse. Lorsqu'un diagnostic échoue, la carte peut revenir au regroupement par interfaces et conserver les personnalisations ; si un cache précédent existe, le serveur peut le renvoyer comme périmé.
-
-**État de validation :** les structures et les appels sont testés avec des réponses **simulées**. L'extraction et le rattachement complets via la véritable API d'une Livebox 7 **restent à valider sur une installation HAOS réelle**.
-
-## Installation
-
-### 1. Prérequis
-
-- Home Assistant et HACS fonctionnels. Le fichier `hacs.json` du dépôt indique Home Assistant **2026.11.0** comme version minimale déclarée ; les versions antérieures ne sont pas validées ici.
-- [Orange Livebox de cyr-ius](https://github.com/cyr-ius/hass-livebox-component) déjà configurée dans **Paramètres → Appareils et services**.
-- Suivi Wi-Fi et filaire activés ; des entités `device_tracker` Orange activées et disposant de leurs attributs.
-
-### 2. Installer Livebox Réseau avec HACS
-
-1. Dans HACS, ajoutez `https://github.com/Stitchou/livebox-reseau` comme **dépôt personnalisé** de type **Intégration**.
-2. Installez **Livebox Réseau** depuis la branche de développement ; aucune release stable n'est encore publiée.
-3. **Redémarrez Home Assistant Core**, y compris lors de la première installation, même si HACS ne propose pas le bouton.
-4. Dans **Paramètres → Appareils et services → Ajouter une intégration**, ajoutez **Livebox Réseau**. Cette étape active notamment le stockage partagé ; **aucun mot de passe Livebox supplémentaire n'est demandé**.
-5. Dans **Paramètres → Tableaux de bord → Ressources**, vérifiez la présence d'une seule ressource JavaScript de type **Module** : `/livebox-reseau/livebox-topologie-card.js?v=0.5.0`. L'intégration essaie de la créer automatiquement en mode de ressources Lovelace « stockage ». Ajoutez-la manuellement si nécessaire.
-6. Rechargez le navigateur (`Ctrl + Maj + R` sur Firefox), puis ajoutez la carte au dashboard.
-
-### 3. Carte Lovelace
+La carte peut être ajoutée depuis l'éditeur visuel Lovelace. Configuration YAML minimale :
 
 ```yaml
 type: custom:livebox-topologie-card
 title: Mon réseau Livebox
 router_name: Livebox 7
 router_ip: 192.168.1.1
-auto_velop_rdc: true
-auto_velop_garage: true
 grid_options:
   columns: full
   rows: auto
 ```
 
-La carte peut aussi être ajoutée depuis le sélecteur de cartes de Home Assistant ; elle possède un **éditeur visuel**. Les valeurs `router_name` et `router_ip` servent à **l'affichage** et ne configurent pas l'accès réseau à la Livebox.
+`router_name` et `router_ip` ne servent qu'à **l'affichage**. Ils ne configurent pas la connexion à la box.
 
-### Mise à jour depuis les versions précédentes
+### Mise à jour depuis la v0.5.0
 
-Conservez `custom:livebox-topologie-card` et le stockage existant. Après publication des nouveaux fichiers dans le dépôt, choisissez **Télécharger à nouveau** dans HACS, redémarrez **Home Assistant Core** si le Python a changé, puis rechargez votre navigateur. Le JavaScript chargé doit porter le paramètre `?v=0.5.0`.
+Mettez à jour le contenu du dépôt, puis **Télécharger à nouveau** dans HACS. Redémarrez Home Assistant Core pour mettre à jour le composant Python, actualisez le navigateur et vérifiez le paramètre `?v=0.6.0` sur la ressource.
 
-**Ne supprimez pas** l'intégration Orange Livebox ni le fichier `.storage/livebox_reseau_map` : ce dernier conserve les corrections faites sur les appareils. Les anciens fichiers `/config/www/livebox-reseau-card.js` et l'ancienne carte `custom:livebox-reseau-card` ne sont pas nécessaires à cette version.
+**Ne supprimez ni l'intégration Orange ni `.storage/livebox_reseau_map`** : le stockage des corrections reste compatible. Vous n'avez pas besoin de recréer vos cartes existantes `custom:livebox-topologie-card`.
 
-## Utilisation et diagnostic
+## Actualisation, diagnostic et stockage
 
-Le badge **« Synchronisé HA »** confirme que le service de **stockage des personnalisations** répond. **Il ne confirme pas, à lui seul, que `TopologyDiagnostics` fonctionne.** Cette information est indiquée séparément sous la barre d'outils : **« Topologie Livebox : X nœuds analysés »**, ou un message d'erreur avec retour au classement par interfaces.
+- **Actualiser** appelle le service de topologie depuis la carte. Il reste soumis au **cache serveur de 900 secondes** (15 minutes) : une nouvelle pression ne signifie donc pas nécessairement un nouvel appel effectif à la Livebox.
+- **Diagnostic** permet de copier les relations normalisées lorsqu'elles sont disponibles ; les noms demeurent visibles, donc **vérifiez avant partage**.
+- Le badge **« Synchronisé HA »** confirme le bon fonctionnement du **stockage des personnalisations**, **pas** la réussite du diagnostic Livebox. La ligne de statut sous la barre d'outils indique distinctement si `TopologyDiagnostics` répond.
+- En cas d'échec de cette API interne, le tableau garde un **mode de secours par interfaces** et les modifications déjà enregistrées.
+- Aucune nouvelle entité Recorder, aucune modification de MariaDB et aucun service cloud tiers ne sont requis. Il s'agit d'une intégration Home Assistant avec une carte Lovelace, **pas d'un add-on HAOS**.
 
-Ouvrez une branche ETH/Wi-Fi pour visualiser ses appareils, puis sélectionnez un appareil pour modifier son rattachement. Les changements sont enregistrés dans Home Assistant et partagés entre navigateurs et téléphones connectés. Seuls les **administrateurs Home Assistant** peuvent enregistrer ces corrections ; la lecture de la carte est accessible aux utilisateurs HA authentifiés autorisés à voir le dashboard.
+## Tests et limites de validation
 
-Pour étudier une erreur de topologie, utilisez **« ⧉ Diagnostic » → « Copier »**. Les adresses IP et MAC sont omises, mais les **noms d'appareils restent visibles** : vérifiez le contenu avant de le publier. Le diagnostic n'est disponible que si la récupération de topologie a réussi.
-
-## Stockage, sécurité et limitations techniques
-
-- **Persistance :** `.storage/livebox_reseau_map`, géré par le stockage Home Assistant. Les modifications individuelles passent par les commandes WebSocket `livebox_reseau/get`, `set`, `subscribe` et `import`.
-- **Topologie :** commande WebSocket `livebox_reseau/topology`, lecture via le compte Livebox de l'intégration Orange. Cache en mémoire de 900 secondes, perdu au redémarrage HA Core.
-- **Données visibles dans le navigateur :** les noms, IP, MAC et interfaces des `device_tracker`, ainsi que les nœuds normalisés de topologie, sont accessibles au dashboard HA authentifié. Le bouton de diagnostic masque seulement IP et MAC **dans la copie produite**, pas dans les données utilisées pour dessiner la carte.
-- **Pas de modification de la configuration Livebox :** le diagnostic demandé à l'API est distinct des opérations de configuration du routeur.
-- **Dépendance à une API interne :** `TopologyDiagnostics` et l'objet `runtime_data.api` de l'intégration Orange sont susceptibles d'évoluer. Si l'appel n'est pas disponible, le mode de secours utilise les états HA et les groupes d'interfaces.
-- **Installation du dépôt :** ce projet est une intégration Home Assistant accompagnée d'une carte Lovelace, **pas un add-on HAOS autonome**.
-
-## Tests et état du projet
-
-Des tests locaux vérifient la syntaxe et l'import de structures `Children` simulées, les règles de regroupement, les interactions de la carte et le stockage WebSocket simulé. Ils ne remplacent **pas** une validation sur une véritable Livebox 7, sur le système Home Assistant cible et sur plusieurs appareils.
+Les tests sont exécutés avec des données **synthétiques**, et non sur un réseau personnel :
 
 ```bash
 python -m compileall -q custom_components/livebox_reseau
 node --check custom_components/livebox_reseau/frontend/livebox-topologie-card.js
 pytest -q tests/test_backend.py tests/test_topology.py
-node tests/test_v04.cjs
-node tests/test_topology_front.cjs
 node tests/test_grid_options.cjs
+python tests/test_v06_ui.py
 ```
 
-**Statut : développement expérimental.** Ne pas présenter comme stable avant validation de la collecte réelle, de la qualité de la carte et des corrections de parenté (en particulier les Velop en mode pont et les CPL).
+Le dernier test prend les captures fictives PC et mobile, vérifie l'ouverture des cinq branches ETH, la sous-branche **CPL maître → CPL secondaire**, les clics, les boutons « Tout déployer / Tout replier » et l'absence de débordement horizontal à 375 px.
+
+**Les résultats de simulation ne valent pas validation en production** : la collecte des liens et la pertinence de l'arbre sur une véritable Livebox 7 restent à confirmer, notamment pour les switchs mal identifiés, les CPL et les points d'accès en mode pont.
 
 ## Crédits
 
-L'intégration **[Orange Livebox](https://github.com/cyr-ius/hass-livebox-component)** est un projet distinct, développé et maintenu par **cyr-ius**. Livebox Réseau s'appuie sur son fonctionnement, sans l'inclure ni en être une extension officielle. Orange et Livebox sont des marques de leurs détenteurs respectifs.
+**[Orange Livebox](https://github.com/cyr-ius/hass-livebox-component)** est une intégration indépendante maintenue par **cyr-ius**. Livebox Réseau la réutilise comme dépendance fonctionnelle, sans en être une extension officielle. Orange et Livebox sont des marques de leurs détenteurs respectifs.

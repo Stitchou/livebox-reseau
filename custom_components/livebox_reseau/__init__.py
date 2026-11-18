@@ -28,7 +28,7 @@ LINKS = {"wifi", "ethernet", "cpl", "other"}
 _LOGGER = logging.getLogger(__name__)
 FRONTEND_PATH = Path(__file__).parent / "frontend"
 URL_BASE = "/livebox-reseau"
-RESOURCE_URL = URL_BASE + "/livebox-topologie-card.js?v=0.5.0"
+RESOURCE_URL = URL_BASE + "/livebox-topologie-card.js?v=0.6.0"
 TOPOLOGY_CACHE_SECONDS = 900
 
 

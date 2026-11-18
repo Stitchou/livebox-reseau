@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Livebox Network",
+        "description": "Local network topology card using Orange Livebox device trackers. No extra credentials required."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "This integration has already been configured."
+    }
+  }
+}

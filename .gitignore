@@ -1,0 +1,8 @@
+# Cache / build Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+# Captures des tests locaux
+tests/*.png
+tests/test_browser.html
+.DS_Store

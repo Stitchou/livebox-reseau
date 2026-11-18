@@ -2,13 +2,15 @@
 
 Une carte de topologie graphique Lovelace, utilisable sur PC et téléphone, qui **lit les `device_tracker` de l’intégration Orange Livebox existante**. Aucun scan IP supplémentaire, aucun identifiant Livebox, aucune purge de Recorder.
 
-**Version : 0.4.2 (préversion expérimentale).** Aucune validation sur un Home Assistant réel n’a encore été réalisée. À tester sur une sauvegarde récente.
+**Version : 0.4.4 (préversion expérimentale).** Les versions précédentes ont été affichées dans Home Assistant, mais les changements de la 0.4.4 (icônes et thème transparent) ne sont pas encore validés sur l’instance réelle. À tester avant toute release GitHub.
 
 ## Fonctions
 
 - Nom réel fourni par l’intégration Orange, adresse IP, MAC, disponibilité.
 - Branches regroupées par `interface_name` (`ETH0`, `ETH1`, `ETH2`...), Wi-Fi si reconnu.
 - Graphique SVG : Livebox au centre, clic sur une branche pour explorer ses appareils, recherche, zoom/déplacement.
+- **Éditeur visuel natif** : titre, nom/IP du routeur, regroupement Velop RDC.
+- Correctif des clics sur les branches : le glissement n’intercepte plus les pressions simples.
 - Personnalisation de chaque appareil : nom, branche, parent, type de liaison, masquer.
 - Réglages partagés entre PC et téléphone via Home Assistant (`.storage/livebox_reseau_map`) et l’API WebSocket ; droits administrateur requis pour modifier.
 - Règle facultative `auto_velop_rdc: true` : les autres appareils vus sur `ETH2` sont rattachés à Velop RDC en Wi-Fi, **uniquement parce que cette configuration a été confirmée par l’utilisateur**.
@@ -23,8 +25,8 @@ L’attribut `ETH2` signifie que la Livebox voit l’appareil à travers cette i
 2. Dans HACS → ⋮ → Dépôts personnalisés, saisir `https://github.com/Stitchou/livebox-reseau` et sélectionner **Intégration**.
 3. Installer **Livebox Réseau — carte graphique** depuis HACS, puis redémarrer Home Assistant **Core**.
 4. Dans Paramètres → Appareils et services → Ajouter une intégration, ajouter **Livebox Réseau**.
-5. La ressource JavaScript est ajoutée automatiquement lorsque les ressources Lovelace sont en mode stockage. Vérifier dans Paramètres → Tableaux de bord → Ressources. Si elle n’apparaît pas, l’ajouter manuellement en **Module JavaScript** : `/livebox-reseau/livebox-topologie-card.js?v=0.4.2`.
-6. Dans le dashboard, ajouter une carte **Manuel** :
+5. La ressource JavaScript est ajoutée automatiquement lorsque les ressources Lovelace sont en mode stockage. Vérifier dans Paramètres → Tableaux de bord → Ressources. Si elle n’apparaît pas, l’ajouter manuellement en **Module JavaScript** : `/livebox-reseau/livebox-topologie-card.js?v=0.4.4`.
+6. Dans le dashboard, sélectionner **Livebox Réseau — carte graphique** : son **éditeur visuel** permet de régler le titre, la Livebox et Velop RDC. Le YAML équivalent (facultatif) :
 
 ```yaml
 type: custom:livebox-topologie-card
@@ -39,6 +41,35 @@ grid_options:
 
 7. Attendre l’indicateur **● Synchronisé HA** ; si **⚠ Stockage HA absent** apparaît, utiliser **Réessayer** et vérifier que l’intégration est bien ajoutée dans Appareils et services. **Ne pas croire qu’une sauvegarde a été faite si le statut n’est pas synchronisé.**
 8. Rafraîchir Firefox avec `Ctrl + Maj + R` si nécessaire. Sur mobile, la même configuration de liens apparaît avec le compte Home Assistant, sans export YAML.
+
+## Version visible dans HACS : commit ou release
+
+Sans **GitHub Release**, HACS affiche les **7 premiers caractères du dernier commit** (par exemple `ccffb70`) et non le champ `version` du `manifest.json`. C’est le comportement normal de HACS.
+
+**Pour le moment, ne créez pas de release** : les versions peuvent être testées avec la branche par défaut et un numéro de commit dans HACS. Lorsque la carte sera validée, pour afficher **`v0.4.4`** :
+
+1. Mettre tous les fichiers de cette version à jour à la racine du dépôt GitHub. Vérifier `custom_components/livebox_reseau/manifest.json` (`"version": "0.4.4"`).
+2. Dans GitHub → **Releases → Draft a new release**, créer le tag **`v0.4.4` sur le commit contenant cette version**, puis **Publish release**. Un simple tag sans publication de release ne suffit pas.
+3. Dans HACS, rafraîchir les données du dépôt, puis **Télécharger à nouveau**, sélectionner `v0.4.4` si nécessaire ; après téléchargement, redémarrer Home Assistant Core.
+4. Contrôler le numéro réellement installé dans `/config/custom_components/livebox_reseau/manifest.json` et dans HACS. Si le basculement commit → release ne propose aucune mise à jour, forcer *Télécharger à nouveau* : des versions de HACS peuvent ne pas détecter cette transition correctement.
+
+Le ZIP fourni est **un export de dépôt**, pas une GitHub Release publiée. L’importer dans GitHub et publier la release sont des actions distinctes.
+
+## Mise à jour 0.4.3 → 0.4.4
+
+- **Icône native** dans `custom_components/livebox_reseau/brand/` (`icon.png`, `dark_icon.png` et versions @2x) : Home Assistant 2026.3+ la reconnaît directement dans **Paramètres → Appareils et services**. Selon la version de HACS, la vignette du catalogue HACS peut encore afficher un pictogramme générique : ce problème est distinct de la page des intégrations Home Assistant.
+- **Fond du graphe entièrement transparent**, sans trame à points ni fond gris forcé ; le fond du `ha-card` suit le thème du dashboard.
+- **Bulles et libellés lisibles en clair et sombre** : couleurs issues de `--card-background-color`, `--secondary-background-color`, `--primary-text-color`, `--secondary-text-color`, `--primary-color` et `--success-color`.
+- Mettre à jour le dépôt, puis **Télécharger à nouveau** dans HACS, redémarrer Home Assistant Core et utiliser la ressource `/livebox-reseau/livebox-topologie-card.js?v=0.4.4` (sans ressource en doublon). Actualiser Firefox avec `Ctrl + Maj + R`.
+- Les paramètres personnalisés restent enregistrés dans `.storage/livebox_reseau_map` ; **ne pas supprimer ce fichier**.
+
+## Mise à jour 0.4.2 → 0.4.3
+
+- Correction des clics sur les bulles `ETHx` : `setPointerCapture` n'est activé qu'en cas de vrai glissement, évitant de détourner les clics sur les nœuds.
+- Ajout de `getConfigElement()` et de l'éditeur visuel Home Assistant : titre, nom/IP du routeur et regroupement `ETH2` sous Velop RDC.
+- **Ne pas supprimer l'intégration existante ni `.storage/livebox_reseau_map`** : les réglages des équipements restent intacts.
+- Mettre à jour les fichiers du dépôt GitHub, actualiser l'intégration depuis HACS puis redémarrer Home Assistant Core. La ressource doit pointer sur `.../livebox-topologie-card.js?v=0.4.3` pour la version précédente, puis `...?v=0.4.4` après la nouvelle mise à jour ; recharger le navigateur (`Ctrl + Maj + R`).
+- Depuis le dashboard : **Modifier la carte** → l'éditeur visuel doit apparaître. Cliquer sur `Ethernet · ETH2` → le groupe doit s'ouvrir, puis cliquer sur un appareil pour modifier sa relation.
 
 ## Mise à niveau depuis les versions précédentes
 

@@ -1,5 +1,5 @@
-/* Livebox Réseau — Topologie graphique v0.4.2 (sans dépendance externe). */
-const LIVEBOX_TOPO_VERSION='0.4.2';
+/* Livebox Réseau — Topologie graphique v0.4.4 (sans dépendance externe). */
+const LIVEBOX_TOPO_VERSION='0.4.4';
 function liveboxReadDevices(hass) {
   if (!hass || !hass.states) return [];
   return Object.values(hass.states)
@@ -122,6 +122,7 @@ const truncate=(s,n=23)=>String(s).length>n?String(s).slice(0,n-1)+'…':String(
 
 class LiveboxTopologieCard extends HTMLElement {
   static getStubConfig(){return {title:'Mon réseau Livebox',router_name:'Livebox 7',router_ip:'192.168.1.1'};}
+  static getConfigElement(){return document.createElement('livebox-topologie-card-editor');}
   getCardSize(){return 9;}
   setConfig(config){
     if(!config || (config.type && config.type!=='custom:livebox-topologie-card'))throw Error('Configuration invalide pour Livebox Topologie');
@@ -167,7 +168,7 @@ class LiveboxTopologieCard extends HTMLElement {
       #search{border:1px solid var(--divider-color);background:var(--secondary-background-color);border-radius:9px;padding:9px 11px;font-size:12px;flex:1 1 160px;min-width:110px;max-width:390px}
       .toggle{font-size:12px;white-space:nowrap;display:flex;gap:5px;align-items:center;color:var(--secondary-text-color)}
       input[type=checkbox]{accent-color:var(--primary-color)}
-      .viewport{position:relative;border-radius:14px;border:1px solid var(--divider-color);overflow:hidden;background-color:var(--secondary-background-color);background-image:radial-gradient(circle at center, var(--divider-color) .75px,transparent 1px);background-size:22px 22px;}
+      .viewport{position:relative;border-radius:14px;border:1px solid var(--divider-color);overflow:hidden;background:transparent;background-image:none;}
       svg#network{display:block;width:100%;height:clamp(440px,65vh,690px);touch-action:none;cursor:grab;user-select:none}
       svg#network.dragging{cursor:grabbing}
       .zoom{position:absolute;right:10px;bottom:11px;display:flex;gap:5px;z-index:1}
@@ -279,14 +280,14 @@ class LiveboxTopologieCard extends HTMLElement {
       groups.forEach((g,i)=>{
         const x=140+(i%2)*240, y=226+Math.floor(i/2)*row;
         nodes.push({kind:'group',id:g.key,name:g.label,subtitle:`${g.roots.reduce((n,d)=>n+this._count(d),0)} appareils`,x,y,w:213,h:72,online:true});
-        edges.push({x1:260,y1:113,x2:x,y2:y-37,color:'#4a91b5'});
+        edges.push({x1:260,y1:113,x2:x,y2:y-37,color:'var(--primary-color, #4a91b5)'});
       });return {width:W,height:H,nodes,edges};
     }
     const W=1320,H=790,cx=660,cy=398,rx=380,ry=268;
     const nodes=[{kind:'router',name:this._config?.router_name||'Livebox 7',subtitle:this._config?.router_ip||'192.168.1.1',x:cx,y:cy,w:240,h:96}],edges=[];
     groups.forEach((g,i)=>{const a=-Math.PI/2+2*Math.PI*i/Math.max(groups.length,1),x=cx+rx*Math.cos(a),y=cy+ry*Math.sin(a);
       nodes.push({kind:'group',id:g.key,name:g.label,subtitle:`${g.roots.reduce((n,d)=>n+this._count(d),0)} appareils`,x,y,w:220,h:82,online:true});
-      edges.push({x1:cx,y1:cy,x2:x,y2:y,color:'#4a91b5'});
+      edges.push({x1:cx,y1:cy,x2:x,y2:y,color:'var(--primary-color, #4a91b5)'});
     });return {width:W,height:H,nodes,edges};
   }
   _sceneDetail(group){
@@ -305,7 +306,7 @@ class LiveboxTopologieCard extends HTMLElement {
     const W=mobile?520:1730,center=mobile?130:H/2;
     const router={kind:'router',name:this._config?.router_name||'Livebox 7',subtitle:this._config?.router_ip||'192.168.1.1',x:mobile?128:150,y:mobile?65:center,w:mobile?190:226,h:mobile?70:86};
     const iface={kind:'interface',name:group.label,subtitle:`${roots.reduce((n,d)=>n+this._count(d),0)} équipements`,x:mobile?372:435,y:mobile?65:center,w:mobile?235:212,h:mobile?70:78};
-    const nodes=[router,iface],edges=[{x1:router.x,y1:router.y,x2:iface.x,y2:iface.y,color:'#4a91b5'}];
+    const nodes=[router,iface],edges=[{x1:router.x,y1:router.y,x2:iface.x,y2:iface.y,color:'var(--primary-color, #4a91b5)'}];
     const positions=new Map();
     descendants.forEach(({node},i)=>{const x=(mobile?140:950)+(i%cols)*stepX,y=top+Math.floor(i/cols)*stepY;
       const n={kind:'device',id:node.entityId,data:node,name:node.name,subtitle:node.ip||'IP inconnue',x,y,w:mobile?218:204,h:61,online:node.online};
@@ -316,31 +317,31 @@ class LiveboxTopologieCard extends HTMLElement {
       const average=linked.length?linked.reduce((v,n)=>v+n.y,0)/linked.length:center;
       const x=mobile?260:690,y=mobile?204:average;
       const n={kind:'device',id:parent.entityId,data:parent,name:parent.name,subtitle:parent.ip||'Point d’accès',x,y,w:mobile?206:208,h:66,online:parent.online};
-      positions.set(parent.entityId,n);nodes.push(n);edges.push({x1:iface.x,y1:iface.y,x2:x,y2:y,color:'#4a91b5'});
+      positions.set(parent.entityId,n);nodes.push(n);edges.push({x1:iface.x,y1:iface.y,x2:x,y2:y,color:'var(--primary-color, #4a91b5)'});
     });
     for(const {node,parent} of descendants){
       const dest=positions.get(node.entityId);
       const src=parent?positions.get(parent):iface;
-      if(dest&&src){edges.push({x1:src.x,y1:src.y,x2:dest.x,y2:dest.y,color:node.online?'#42a7a1':'#86939c',dash:node.link==='wifi'});}
+      if(dest&&src){edges.push({x1:src.x,y1:src.y,x2:dest.x,y2:dest.y,color:node.online?'var(--success-color, #42a7a1)':'var(--secondary-text-color, #86939c)',dash:node.link==='wifi'});}
     }
     return {width:W,height:H,nodes,edges};
   }
   _edge(target,e){
     const dx=e.x2-e.x1,dy=e.y2-e.y1;
-    const path=svgEl('path',{d:`M${e.x1} ${e.y1} C${e.x1+dx*.42} ${e.y1},${e.x2-dx*.40} ${e.y2},${e.x2} ${e.y2}`,fill:'none',stroke:e.color||'#6b8391','stroke-width':2.2,'stroke-opacity':0.75});
+    const path=svgEl('path',{d:`M${e.x1} ${e.y1} C${e.x1+dx*.42} ${e.y1},${e.x2-dx*.40} ${e.y2},${e.x2} ${e.y2}`,fill:'none',stroke:e.color||'var(--secondary-text-color, #6b8391)','stroke-width':2.2,'stroke-opacity':0.75});
     if(e.dash)path.setAttribute('stroke-dasharray','7 6');target.appendChild(path);
   }
   _drawNode(target,n){
     const g=svgEl('g',{transform:`translate(${n.x-n.w/2} ${n.y-n.h/2})`,style:'cursor:pointer'});
     const isRouter=n.kind==='router',isGroup=n.kind==='group',isIface=n.kind==='interface';
-    const stroke=isRouter?'#33b3df':isGroup||isIface?'#558ba4':n.online?'#2e997f':'#768691';
-    const bg=isRouter?'#143c50':isGroup||isIface?'#193341':'#1c2934';
+    const stroke=isRouter?'var(--primary-color, #33b3df)':isGroup||isIface?'var(--secondary-text-color, #558ba4)':n.online?'var(--success-color, #2e997f)':'var(--divider-color, #768691)';
+    const bg=isRouter?'var(--secondary-background-color, #e9f3fa)':isGroup||isIface?'var(--secondary-background-color, #f3f6f9)':'var(--card-background-color, var(--ha-card-background, #ffffff))';
     g.appendChild(svgEl('rect',{x:0,y:0,width:n.w,height:n.h,rx:isRouter?17:12,fill:bg,stroke,'stroke-width':isRouter?2.5:1.4}));
     const icon=isRouter?'◈':isGroup||isIface?(/^wifi:/i.test(n.id||'')?'◎':'▦'):(n.data?.link==='wifi'||n.data?.type==='wifi'?'◉':'▣');
     g.appendChild(svgEl('text',{x:18,y:n.h/2+7,'font-size':isRouter?26:22,fill:stroke,'font-weight':700},icon));
-    g.appendChild(svgEl('text',{x:51,y:n.h/2-5,'font-size':isRouter?17:14,'font-weight':700,fill:'#f5fafc'},truncate(n.name,isRouter?19:21)));
-    g.appendChild(svgEl('text',{x:51,y:n.h/2+15,'font-size':12,fill:'#b5c7d0'},truncate(n.subtitle,28)));
-    if(n.kind==='device'){g.appendChild(svgEl('circle',{cx:n.w-13,cy:13,r:5.5,fill:n.online?'#25b993':'#91a2ac'}));}
+    g.appendChild(svgEl('text',{x:51,y:n.h/2-5,'font-size':isRouter?17:14,'font-weight':700,fill:'var(--primary-text-color, #17212b)'},truncate(n.name,isRouter?19:21)));
+    g.appendChild(svgEl('text',{x:51,y:n.h/2+15,'font-size':12,fill:'var(--secondary-text-color, #52606d)'},truncate(n.subtitle,28)));
+    if(n.kind==='device'){g.appendChild(svgEl('circle',{cx:n.w-13,cy:13,r:5.5,fill:n.online?'var(--success-color, #25b993)':'var(--secondary-text-color, #91a2ac)'}));}
     if(n.kind==='group'){
       g.addEventListener('click',()=>{if(!this._moved)this._focusGroup(n.id);});
       g.appendChild(svgEl('title',{},'Ouvrir cette branche'));
@@ -372,17 +373,40 @@ class LiveboxTopologieCard extends HTMLElement {
   _applyView(){if(this._view)this.shadowRoot.getElementById('network').setAttribute('viewBox',`${this._view.x} ${this._view.y} ${this._view.w} ${this._view.h}`);}
   _changeZoom(factor){if(!this._layout||!this._view)return;const oldZoom=this._zoom;this._zoom=clamp(oldZoom*factor,1,5);const view=this._view,ratio=oldZoom/this._zoom;
     const w=view.w*ratio,h=view.h*ratio;view.x=clamp(view.x+(view.w-w)/2,0,Math.max(0,this._layout.width-w));view.y=clamp(view.y+(view.h-h)/2,0,Math.max(0,this._layout.height-h));view.w=w;view.h=h;this._applyView();}
-  _onDown(e){if(e.button!==0)return;const svg=this.shadowRoot.getElementById('network');this._pointer.set(e.pointerId,{x:e.clientX,y:e.clientY});this._moved=false;svg.classList.add('dragging');svg.setPointerCapture(e.pointerId);}
-  _onMove(e){if(!this._pointer.has(e.pointerId)||!this._view||!this._layout)return;const prev=this._pointer.get(e.pointerId);const deltaX=e.clientX-prev.x,deltaY=e.clientY-prev.y;
-    if(Math.abs(deltaX)+Math.abs(deltaY)>3)this._moved=true;
-    this._pointer.set(e.pointerId,{x:e.clientX,y:e.clientY});
-    const svg=this.shadowRoot.getElementById('network');const box=svg.getBoundingClientRect();
-    if(!box.width||!box.height)return;
-    const v=this._view;
-    v.x=clamp(v.x-deltaX*v.w/box.width,0,Math.max(0,this._layout.width-v.w));
-    v.y=clamp(v.y-deltaY*v.h/box.height,0,Math.max(0,this._layout.height-v.h));this._applyView();
+  // Pointer capture uniquement APRES avoir réellement commencé à déplacer le graphe.
+  // Avant : la capture systématique sur le SVG détournait aussi le click des bulles ETH.
+  _onDown(e){
+    if(e.button!==0)return;
+    this._pointer.set(e.pointerId,{x:e.clientX,y:e.clientY,startX:e.clientX,startY:e.clientY,dragging:false});
+    this._moved=false;
   }
-  _onUp(e){this._pointer.delete(e.pointerId);this.shadowRoot.getElementById('network').classList.remove('dragging');if(this._moved){const moved=true;queueMicrotask(()=>{if(moved)this._moved=false;});}}
+  _onMove(e){
+    const p=this._pointer.get(e.pointerId);
+    if(!p||!this._view||!this._layout)return;
+    const svg=this.shadowRoot.getElementById('network');
+    if(!p.dragging){
+      if(Math.hypot(e.clientX-p.startX,e.clientY-p.startY)<9)return;
+      p.dragging=true;this._moved=true;svg.classList.add('dragging');
+      try{svg.setPointerCapture(e.pointerId);}catch(_e){/* souris déjà relâchée */}
+    }
+    const dx=e.clientX-p.x,dy=e.clientY-p.y;
+    p.x=e.clientX;p.y=e.clientY;
+    const box=svg.getBoundingClientRect();if(!box.width||!box.height)return;
+    const v=this._view;
+    v.x=clamp(v.x-dx*v.w/box.width,0,Math.max(0,this._layout.width-v.w));
+    v.y=clamp(v.y-dy*v.h/box.height,0,Math.max(0,this._layout.height-v.h));this._applyView();
+  }
+  _onUp(e){
+    const p=this._pointer.get(e.pointerId);this._pointer.delete(e.pointerId);
+    const svg=this.shadowRoot.getElementById('network');
+    if(p?.dragging){
+      if(svg.hasPointerCapture(e.pointerId))svg.releasePointerCapture(e.pointerId);
+      this._moved=true;
+      // Le navigateur émet click APRES pointerup : conserver le marqueur jusque-là.
+      setTimeout(()=>{this._moved=false;},0);
+    }
+    if(![...this._pointer.values()].some(v=>v.dragging))svg.classList.remove('dragging');
+  }
   _modal(title){const host=this.shadowRoot.getElementById('modal-host');host.replaceChildren();const layer=document.createElement('div');layer.className='overlay';const dialog=document.createElement('div');dialog.className='dialog';dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');const h=document.createElement('h3');h.textContent=title;dialog.appendChild(h);layer.appendChild(dialog);host.appendChild(layer);const close=()=>host.replaceChildren();layer.addEventListener('click',e=>{if(e.target===layer)close();});return {dialog,close};}
   _field(box,label,control){const wrap=document.createElement('label');wrap.className='field';const span=document.createElement('span');span.textContent=label;wrap.append(span,control);box.appendChild(wrap);}
   _selectOptions(items,active){const s=document.createElement('select');for(const [key,label] of items){const opt=document.createElement('option');opt.value=key;opt.textContent=label;opt.selected=key===active;s.appendChild(opt);}return s;}
@@ -418,6 +442,53 @@ class LiveboxTopologieCard extends HTMLElement {
     },true]]);
   }
 }
+
+
+// Editeur visuel Lovelace. Les réglages des équipements, eux, sont sauvegardés
+// dans HAOS via WebSocket et non dans le YAML du dashboard.
+class LiveboxTopologieCardEditor extends HTMLElement {
+  constructor(){super();this.attachShadow({mode:'open'});}
+  setConfig(config){this._config={...config};this._render();}
+  set hass(value){this._hass=value;}
+  _render(){
+    if(!this._config)return;
+    const s=this.shadowRoot;s.replaceChildren();
+    const style=document.createElement('style');
+    style.textContent=`:host{display:block;color:var(--primary-text-color)}
+      .form{display:grid;gap:14px;padding:12px 2px}
+      label{display:grid;gap:5px;font-size:14px}
+      input[type=text]{width:100%;box-sizing:border-box;border:1px solid var(--divider-color);border-radius:8px;background:var(--secondary-background-color);padding:11px;color:var(--primary-text-color);font:inherit}
+      .toggle{display:flex;align-items:center;gap:10px}
+      .note{font-size:12px;color:var(--secondary-text-color);line-height:1.5}
+      .state{font-size:12px;color:var(--secondary-text-color)}`;
+    const form=document.createElement('div');form.className='form';
+    const addField=(label,key,fallback)=>{
+      const wrap=document.createElement('label'),caption=document.createElement('span'),inp=document.createElement('input');
+      caption.textContent=label;inp.type='text';inp.value=this._config[key]??fallback;
+      inp.addEventListener('change',()=>this._update(key,inp.value.trim()));
+      wrap.append(caption,inp);form.appendChild(wrap);
+    };
+    addField('Titre de la carte','title','Mon réseau Livebox');
+    addField('Nom du routeur','router_name','Livebox 7');
+    addField('Adresse IP du routeur','router_ip','192.168.1.1');
+    const row=document.createElement('label');row.className='toggle';
+    const check=document.createElement('input');check.type='checkbox';check.checked=this._config.auto_velop_rdc!==false;
+    check.addEventListener('change',()=>this._update('auto_velop_rdc',check.checked));
+    const span=document.createElement('span');span.textContent='Regrouper automatiquement les appareils ETH2 sous Velop RDC';
+    row.append(check,span);form.appendChild(row);
+    const note=document.createElement('p');note.className='note';
+    note.textContent='Pour attribuer un appareil à un autre parent, clique sur sa branche dans le graphe puis sur l’appareil → Configurer. Les réglages des appareils sont enregistrés dans Home Assistant et partagés avec le téléphone.';
+    form.appendChild(note);
+    s.append(style,form);
+  }
+  _update(key,value){
+    if(!this._config)return;
+    const next={...this._config,[key]:value};
+    this._config=next;
+    this.dispatchEvent(new CustomEvent('config-changed',{detail:{config:next},bubbles:true,composed:true}));
+  }
+}
+if(!customElements.get('livebox-topologie-card-editor'))customElements.define('livebox-topologie-card-editor',LiveboxTopologieCardEditor);
 
 if(!customElements.get('livebox-topologie-card'))customElements.define('livebox-topologie-card',LiveboxTopologieCard);
 window.customCards=window.customCards||[];

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
 from homeassistant.helpers.storage import Store
+from .topology import normalise_topology
 
 DOMAIN = "livebox_reseau"
 STORAGE_VERSION = 1
@@ -26,7 +28,8 @@ LINKS = {"wifi", "ethernet", "cpl", "other"}
 _LOGGER = logging.getLogger(__name__)
 FRONTEND_PATH = Path(__file__).parent / "frontend"
 URL_BASE = "/livebox-reseau"
-RESOURCE_URL = URL_BASE + "/livebox-topologie-card.js?v=0.4.4"
+RESOURCE_URL = URL_BASE + "/livebox-topologie-card.js?v=0.5.0"
+TOPOLOGY_CACHE_SECONDS = 900
 
 
 
@@ -58,7 +61,7 @@ def _clean_overrides(raw: Any) -> dict[str, dict[str, Any]]:
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Enregistre la carte intégrée et les commandes WebSocket une seule fois."""
-    for command in (websocket_get, websocket_set, websocket_import, websocket_subscribe):
+    for command in (websocket_get, websocket_set, websocket_import, websocket_subscribe, websocket_topology):
         websocket_api.async_register_command(hass, command)
 
     await hass.http.async_register_static_paths(
@@ -101,6 +104,9 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
         "lock": asyncio.Lock(),
         "revision": int(saved.get("revision", 0)) if str(saved.get("revision", 0)).isdigit() else 0,
         "overrides": _clean_overrides(saved.get("overrides", {})),
+        "topology_lock": asyncio.Lock(),
+        "topology_cached_at": 0.0,
+        "topology_cached": None,
     }
     return True
 
@@ -224,3 +230,63 @@ def websocket_subscribe(hass, connection, msg):
 
     connection.subscriptions[msg["id"]] = async_dispatcher_connect(hass, SIGNAL_UPDATE, forward)
     connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command({vol.Required("type"): "livebox_reseau/topology"})
+@websocket_api.async_response
+async def websocket_topology(hass, connection, msg):
+    """Lit la topologie sur l'API déjà authentifiée d'Orange Livebox.
+
+    Lecture de diagnostic uniquement, jamais de modifications réseau. Cache de
+    15 min partagé entre tous les dashboards ; n'enregistre pas le JSON dans
+    Recorder ou dans le stockage de l'intégration.
+    """
+    if DOMAIN not in hass.data:
+        connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "Intégration non chargée")
+        return
+    state = hass.data[DOMAIN]
+    async with state["topology_lock"]:
+        now = time.monotonic()
+        previous = state["topology_cached"]
+        if previous is not None and now - state["topology_cached_at"] < TOPOLOGY_CACHE_SECONDS:
+            connection.send_result(msg["id"], previous)
+            return
+        entries = hass.config_entries.async_entries("livebox")
+        coordinator = next((getattr(e, "runtime_data", None) for e in entries
+                            if getattr(getattr(e, "runtime_data", None), "api", None)), None)
+        if coordinator is None:
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND,
+                                  "Orange Livebox non chargée ou API indisponible")
+            return
+        api = getattr(getattr(coordinator, "api", None), "topologydiagnostics", None)
+        build = getattr(api, "async_set_topodiags_build", None)
+        if not callable(build):
+            connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND,
+                                  "API TopologyDiagnostics indisponible dans cette version Orange")
+            return
+        try:
+            response = await asyncio.wait_for(build({
+                "Timeout": 30, "LLTDIcon": False, "SendXmlFile": False,
+            }), timeout=48)
+            parsed = normalise_topology(response)
+            if parsed["count"] <= 1:
+                raise ValueError("La Livebox n'a pas renvoyé d'arbre détaillé")
+            state["topology_cached"] = parsed
+            state["topology_cached_at"] = time.monotonic()
+        except (TimeoutError, ValueError, TypeError, AttributeError, RuntimeError) as exc:
+            _LOGGER.warning("Lecture de topologie Livebox impossible : %s", type(exc).__name__)
+            if previous is not None:
+                connection.send_result(msg["id"], {**previous, "stale": True})
+            else:
+                connection.send_error(msg["id"], websocket_api.ERR_UNKNOWN_ERROR,
+                                      "Topologie Livebox indisponible : " + type(exc).__name__)
+            return
+        except Exception as exc:
+            _LOGGER.exception("Échec inattendu de la lecture de topologie Livebox")
+            if previous is not None:
+                connection.send_result(msg["id"], {**previous, "stale": True})
+            else:
+                connection.send_error(msg["id"], websocket_api.ERR_UNKNOWN_ERROR,
+                                      "Topologie Livebox indisponible")
+            return
+        connection.send_result(msg["id"], parsed)

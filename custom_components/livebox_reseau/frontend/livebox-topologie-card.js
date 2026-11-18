@@ -1,5 +1,5 @@
-/* Livebox Réseau — Topologie graphique v0.4.4 (sans dépendance externe). */
-const LIVEBOX_TOPO_VERSION='0.4.4';
+/* Livebox Réseau — Topologie graphique v0.5.0 (sans dépendance externe). */
+const LIVEBOX_TOPO_VERSION='0.5.0';
 function liveboxReadDevices(hass) {
   if (!hass || !hass.states) return [];
   return Object.values(hass.states)
@@ -77,19 +77,96 @@ function liveboxMakeGroups(devices, filter, onlineOnly) {
 // La personnalisation est indexée par entité HA (ou MAC) et ne change jamais les états HA.
 function liveboxDeviceKey(d) { return d.mac ? 'mac:' + d.mac : d.entityId; }
 function liveboxSort(a,b) { return a.name.localeCompare(b.name,'fr',{sensitivity:'base'}); }
-function liveboxTree(devices, overrides, autoVelop = true) {
-  const byId = new Map(devices.map(d=>[d.entityId,d]));
+// Reconciliation MAC avant tout. Une interface ETH seule n'est PAS un lien physique.
+function liveboxCanonicalMac(value){const compact=String(value||'').replace(/[^a-fA-F0-9]/g,'').toUpperCase();return /^[0-9A-F]{12}$/.test(compact)?compact:'';}
+function liveboxTopologyParents(devices,topology){
+  if(!topology?.nodes?.length)return {links:new Map(),virtual:[],count:0};
+  const records=topology.nodes;
+  const nodes=new Map(records.map(n=>[n.id,n]));
+  const byMac=new Map();
+  for(const d of devices){
+    const mac=liveboxCanonicalMac(d.mac);if(mac)byMac.set(mac,d);
+  }
+  const represented=new Map();
+  for(const n of records){
+    const d=byMac.get(liveboxCanonicalMac(n.mac)) || byMac.get(liveboxCanonicalMac(n.key));
+    if(d)represented.set(n.id,d);
+  }
+  const assignedGroup=new Map();const childGroups=new Map();
+  for(const [id,d] of represented){
+    let cur=id;const seen=new Set();
+    while(cur&&!seen.has(cur)){
+      seen.add(cur);
+      if(!childGroups.has(cur))childGroups.set(cur,new Set());
+      childGroups.get(cur).add(d.groupKey);
+      cur=nodes.get(cur)?.parent;
+    }
+  }
+  const virtual=[];
+  const virtualById=new Map();
+  for(const n of records){
+    if(represented.has(n.id) || !n.parent)continue; // Ne jamais doubler les devices HA / root Livebox
+    const groups=childGroups.get(n.id);
+    const isBridge=['switch','bridge','cpl','repeater'].includes(n.kind);
+    if(!isBridge || groups?.size!==1)continue; // pas d'hub inventé !
+    const groupKey=[...groups][0];
+    const source=devices.find(d=>d.groupKey===groupKey);
+    if(!source)continue;
+    const synthetic={entityId:'topo:'+n.id,name:n.name||'Équipement intermédiaire',mac:n.mac||'',ip:'',iface:source.iface,
+      groupKey,groupLabel:source.groupLabel,type:'other',connection:'',frequency:'',online:true,state:'home',source:'livebox',
+      topologyRole:n.kind,topologyKey:n.id};
+    virtual.push(synthetic);virtualById.set(n.id,synthetic);assignedGroup.set(n.id,groupKey);
+  }
+  const links=new Map();
+  for(const [id,d] of represented){
+    let parent=nodes.get(id)?.parent;const seen=new Set([id]);
+    while(parent && !seen.has(parent)){
+      seen.add(parent);
+      const matched=represented.get(parent)||virtualById.get(parent);
+      if(matched && matched.entityId!==d.entityId && matched.groupKey===d.groupKey){
+        links.set(d.entityId,{parentId:matched.entityId,link:'other',source:'livebox'});break;
+      }
+      parent=nodes.get(parent)?.parent;
+    }
+  }
+  for(const [id,d] of virtualById){
+    let parent=nodes.get(id)?.parent;const seen=new Set([id]);
+    while(parent && !seen.has(parent)){
+      seen.add(parent);
+      const matched=represented.get(parent)||virtualById.get(parent);
+      if(matched && matched.entityId!==d.entityId && matched.groupKey===d.groupKey){
+        links.set(d.entityId,{parentId:matched.entityId,link:'other',source:'livebox'});break;
+      }
+      parent=nodes.get(parent)?.parent;
+    }
+  }
+  return {links,virtual,count:represented.size};
+}
+function liveboxTree(devices, overrides, autoVelop = true, topology = null, autoGarage = true) {
+  const imported=liveboxTopologyParents(devices,topology);
+  const allDevices=[...devices,...imported.virtual];
+  const byId = new Map(allDevices.map(d=>[d.entityId,d]));
   const groupsAvailable = new Map(devices.map(d=>[d.groupKey,d.groupLabel]));
   const velop = devices.find(d=>/velop[ _-]*rdc/i.test(d.name) || /velop[ _-]*rdc/i.test(d.entityId));
-  const nodes = devices.map(d=>{
+  const garage = devices.find(d=>/velop[ _-]*garage/i.test(d.name) || /velop[ _-]*garage/i.test(d.entityId));
+  const garageKnown = /^(?:titan(?:[ _-]*2)?|alexa bureau|cong[eé]lateur|pompe piscine)$/i;
+  const nodes = allDevices.map(d=>{
     const o = overrides[liveboxDeviceKey(d)] || overrides[d.entityId] || {};
     const groupKey = groupsAvailable.has(o.group) ? o.group : d.groupKey;
-    const autoParent = autoVelop && velop && velop.groupKey==='eth:ETH2' && groupKey==='eth:ETH2' && velop.entityId!==d.entityId ? velop.entityId : null;
-    let parentId = autoParent;
+    const importedParent=imported.links.get(d.entityId);
+    // Configuration manuelle > règle confirmée Velop RDC > liens Children > interface ETH.
+    const autoParentRdc = autoVelop && velop && !d.source && velop.groupKey==='eth:ETH2' && groupKey==='eth:ETH2' && velop.entityId!==d.entityId ? velop.entityId : null;
+    const autoParentGarage = autoGarage && garage && !d.source && garage.groupKey===groupKey && garageKnown.test(d.name) && garage.entityId!==d.entityId ? garage.entityId : null;
+    const autoParent=autoParentRdc || autoParentGarage;
+    let parentId=autoParent || importedParent?.parentId || null;
+    // Le faux switch déclaré par Orange autour d'un Velop ne représente pas un vrai parent.
+    // Nous gardons le Velop directement sous son interface, puis ses clients confirmés.
+    if ((d.entityId===velop?.entityId && autoVelop) || (d.entityId===garage?.entityId && autoGarage)) parentId=null;
     if (o.parent==='interface') parentId=null;
     else if (o.parent && o.parent!=='auto') parentId=byId.has(o.parent) && o.parent!==d.entityId ? o.parent : null;
+    if(parentId && byId.get(parentId)?.groupKey!==groupKey)parentId=null;
     return {...d, originalName:d.name, name:o.name || d.name, groupKey, groupLabel:groupsAvailable.get(groupKey)||d.groupLabel,
-      parentId, link:o.link && o.link!=='auto' ? o.link : parentId===autoParent && autoParent ? 'wifi' : d.type,
+      parentId, link:o.link && o.link!=='auto' ? o.link : autoParent && parentId===autoParent ? 'wifi' : importedParent?.link||d.type,
       hidden:o.hidden===true, children:[]};
   });
   const map=new Map(nodes.map(d=>[d.entityId,d]));
@@ -101,7 +178,7 @@ function liveboxTree(devices, overrides, autoVelop = true) {
   for(const n of nodes) if(n.parentId) map.get(n.parentId)?.children.push(n);
   nodes.forEach(n=>n.children.sort(liveboxSort));
   const groups=new Map();
-  for(const n of nodes.filter(d=>!d.parentId)) {
+  for(const n of nodes.filter(d=>!d.parentId && !(d.source==='livebox' && d.children.length===0))) {
     if(!groups.has(n.groupKey)) groups.set(n.groupKey,{key:n.groupKey,label:n.groupLabel,type:n.type,roots:[]});
     groups.get(n.groupKey).roots.push(n);
   }
@@ -123,6 +200,10 @@ const truncate=(s,n=23)=>String(s).length>n?String(s).slice(0,n-1)+'…':String(
 class LiveboxTopologieCard extends HTMLElement {
   static getStubConfig(){return {title:'Mon réseau Livebox',router_name:'Livebox 7',router_ip:'192.168.1.1'};}
   static getConfigElement(){return document.createElement('livebox-topologie-card-editor');}
+  // Home Assistant « Sections » : la carte occupe la largeur complète de sa section.
+  // `rows: auto` laisse au graphe sa hauteur naturelle. Pas de restriction maximale
+  // de colonnes : le bureau peut utiliser toute la largeur de la section.
+  getGridOptions(){return {columns:'full',rows:'auto',min_columns:6};}
   getCardSize(){return 9;}
   setConfig(config){
     if(!config || (config.type && config.type!=='custom:livebox-topologie-card'))throw Error('Configuration invalide pour Livebox Topologie');
@@ -143,10 +224,11 @@ class LiveboxTopologieCard extends HTMLElement {
     if(this._updateTimer)clearTimeout(this._updateTimer);
     this._updateTimer=null;
     if(this._wsUnsub){this._wsUnsub();this._wsUnsub=null;}
+    if(this._topologyTimer){clearInterval(this._topologyTimer);this._topologyTimer=null;}
     this._backendStatus='waiting';this._backendPromise=null;
   }
   _init(){
-    this._ready=true;this._devices=[];this._overrides={};this._backendStatus='waiting';this._query='';
+    this._ready=true;this._devices=[];this._overrides={};this._topology=null;this._topologyStatus='waiting';this._backendStatus='waiting';this._query='';
     this._showOnline=false;this._showHidden=false;this._focus=null;this._zoom=1;
     this._layout=null;this._view=null;this._pointer=new Map();this._moved=false;
     this.shadowRoot.innerHTML=`
@@ -194,14 +276,16 @@ class LiveboxTopologieCard extends HTMLElement {
     <ha-card>
       <header class="head"><div><h2 id="title">Mon réseau Livebox</h2><div id="summary" class="sub"></div></div><span class="badge" id="sync">Connexion à HA…</span></header>
       <div class="sync-error" id="sync-error" role="status"><span id="sync-error-text">Enregistrement indisponible.</span><button class="btn" id="retry-sync" type="button">Réessayer</button></div>
-      <nav class="tools"><button class="btn" id="back" hidden>← Réseau complet</button><input type="search" id="search" placeholder="Rechercher un appareil, une IP…" aria-label="Rechercher"><label class="toggle"><input type="checkbox" id="online">En ligne</label><label class="toggle"><input type="checkbox" id="hidden">Masqués</label></nav>
-      <p class="tip" id="hint">Les branches ETHx représentent les interfaces déclarées par la Livebox. Aucun switch intermédiaire n'est deviné.</p>
+      <nav class="tools"><button class="btn" id="back" hidden>← Réseau complet</button><button class="btn" id="reload-topology" type="button" title="Relire les liens connus de la Livebox (cache 15 min)">↻ Topologie Livebox</button><button class="btn" id="copy-topology" type="button" title="Copier le diagnostic de topologie (identifiants anonymisés)">⧉ Diagnostic</button><input type="search" id="search" placeholder="Rechercher un appareil, une IP…" aria-label="Rechercher"><label class="toggle"><input type="checkbox" id="online">En ligne</label><label class="toggle"><input type="checkbox" id="hidden">Masqués</label></nav>
+      <p class="tip" id="topology-state">Topologie : connexion à la Livebox…</p><p class="tip" id="hint">Les branches ETHx représentent les interfaces déclarées par la Livebox. Aucun switch intermédiaire n'est deviné.</p>
       <div class="viewport"><svg id="network" role="img" aria-label="Topologie réseau interactive" xmlns="http://www.w3.org/2000/svg"></svg><div class="zoom"><button class="btn" id="minus" aria-label="Dézoomer">−</button><button class="btn" id="plus" aria-label="Zoomer">+</button><button class="btn" id="reset" aria-label="Recentrer">⤾</button></div><div class="empty" id="empty" hidden></div></div>
       <div class="detail" id="detail"></div>
-      <div class="legend"><span><i class="swatch"></i>En ligne</span><span><i class="swatch off"></i>Hors ligne</span><span>Trait plein : lien configuré / interface déclarée</span><span>Branche ETHx ≠ câble direct</span></div>
+      <div class="legend"><span><i class="swatch"></i>En ligne</span><span><i class="swatch off"></i>Hors ligne</span><span>Liaisons : données Livebox ou correction manuelle</span><span>Topologie Livebox ≠ preuve physique (Velop à vérifier)</span></div>
       <div id="modal-host"></div>
     </ha-card>`;
     const s=this.shadowRoot;
+    s.getElementById('reload-topology').addEventListener('click',()=>this._fetchTopology());
+    s.getElementById('copy-topology').addEventListener('click',()=>this._copyTopology());
     s.getElementById('retry-sync').addEventListener('click',()=>{this._backendStatus='waiting';this._backendPromise=null;this._connectBackend();});
     s.getElementById('search').addEventListener('input',e=>{this._query=e.target.value;this._paint();});
     s.getElementById('online').addEventListener('change',e=>{this._showOnline=e.target.checked;this._paint();});
@@ -241,12 +325,46 @@ class LiveboxTopologieCard extends HTMLElement {
     this._backendPromise=(async()=>{
       const data=await conn.sendMessagePromise({type:'livebox_reseau/get'});
       if(!this.isConnected)return;
-      this._overrides=data.overrides||{};this._backendStatus='ready';this._backendError='';this._showSync();this._paint();
+      this._overrides=data.overrides||{};this._backendStatus='ready';this._fetchTopology();
+      if(!this._topologyTimer)this._topologyTimer=setInterval(()=>{if(this.isConnected)this._fetchTopology();},900000);this._backendError='';this._showSync();this._paint();
       const unsubscribe=await conn.subscribeMessage(data=>{this._overrides=data.overrides||{};this._paint();},{type:'livebox_reseau/subscribe'});
       if(this.isConnected)this._wsUnsub=unsubscribe;else unsubscribe();
     })().catch(err=>{this._backendStatus='error';this._backendError=String(err?.message||err);this._showSync();}).finally(()=>{this._backendPromise=null;});
   }
-  _getGroups(){return liveboxTree(this._devices,{...(this._config?.device_overrides||{}),...this._overrides},this._config?.auto_velop_rdc!==false);}
+  async _fetchTopology(){
+    if(this._topologyPromise || !this._hass?.connection || !this.isConnected)return;
+    this._topologyStatus='loading';this._topologyError='';this._showTopologyState();
+    this._topologyPromise=this._hass.connection.sendMessagePromise({type:'livebox_reseau/topology'})
+      .then(data=>{if(!this.isConnected)return;this._topology=data;this._topologyStatus='ready';this._showTopologyState();this._paint();})
+      .catch(error=>{this._topologyStatus='error';this._topologyError=String(error?.message||error);this._showTopologyState();})
+      .finally(()=>{this._topologyPromise=null;});
+    return this._topologyPromise;
+  }
+  _showTopologyState(){
+    const el=this.shadowRoot?.getElementById('topology-state');if(!el)return;
+    if(this._topologyStatus==='ready')el.textContent=`Topologie Livebox : ${this._topology?.count||0} nœuds analysés · liens issus de « Children » (intermédiaires à confirmer).`;
+    else if(this._topologyStatus==='error')el.textContent='Topologie Livebox inaccessible : '+this._topologyError+' · Affichage de secours par interface.';
+    else el.textContent='Analyse de la topologie Livebox…';
+  }
+  async _copyTopology(){
+    if(!this._topology?.nodes?.length){
+      const {dialog,close}=this._modal('Diagnostic Livebox');
+      const p=document.createElement('p');p.textContent='Aucune topologie disponible. Utilise « ↻ Topologie Livebox » puis réessaie.';
+      dialog.appendChild(p);this._buttons(dialog,[['Fermer',close,false]]);return;
+    }
+    const idMap=new Map(this._topology.nodes.map((n,i)=>[n.id,'N'+(i+1)]));
+    const report={version:LIVEBOX_TOPO_VERSION,source:'TopologyDiagnostics (anonymisé)',count:this._topology.count,
+      nodes:this._topology.nodes.map(n=>({id:idMap.get(n.id),parent:idMap.get(n.parent)||null,
+        name:n.name,kind:n.kind,children_count:n.children_count,tags:n.tags}))};
+    const payload=JSON.stringify(report,null,2);
+    const {dialog,close}=this._modal('Diagnostic de topologie');
+    const info=document.createElement('p');info.className='sub';info.textContent='Identifiants, adresses IP et MAC supprimés. Les noms des appareils restent visibles.';
+    const field=document.createElement('textarea');field.readOnly=true;field.value=payload;field.style.cssText='width:100%;min-height:250px;background:var(--secondary-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color);border-radius:8px;font:11px monospace';
+    dialog.append(info,field);
+    this._buttons(dialog,[['Copier',async()=>{try{await navigator.clipboard.writeText(payload);info.textContent='Diagnostic copié.';}catch(_){field.select();info.textContent='Copie le texte sélectionné avec Ctrl+C.';}},true],['Fermer',close,false]]);
+  }
+  _getGroups(){return liveboxTree(this._devices,{...(this._config?.device_overrides||{}),...this._overrides},this._config?.auto_velop_rdc!==false,this._topology,this._config?.auto_velop_garage!==false);}
+
   _filterTree(){
     const q=this._query.trim().toLocaleLowerCase('fr');
     return this._getGroups().map(g=>({...g,roots:g.roots.map(d=>liveboxPrune(d,q,this._showOnline,this._showHidden)).filter(Boolean)})).filter(g=>g.roots.length);
@@ -421,7 +539,7 @@ class LiveboxTopologieCard extends HTMLElement {
     const name=document.createElement('input');name.maxLength=100;name.value=existing.name||raw.name;this._field(dialog,'Nom sur la carte',name);
     const groups=[...new Map(this._devices.map(x=>[x.groupKey,x.groupLabel])).entries()];
     const group=this._selectOptions([['auto','Automatique (Livebox)'],...groups],existing.group||'auto');this._field(dialog,'Interface / branche',group);
-    const parents=this._devices.filter(x=>x.entityId!==d.entityId).map(x=>[x.entityId,x.name+' — '+(x.ip||'IP inconnue')]);
+    const parents=[...this._devices,...liveboxTopologyParents(this._devices,this._topology).virtual].filter(x=>x.entityId!==d.entityId).map(x=>[x.entityId,x.name+' — '+(x.ip||'IP inconnue')]);
     const parent=this._selectOptions([['auto','Automatique (si confirmé)'],['interface','Directement sous la branche'],...parents],existing.parent||'auto');this._field(dialog,'Équipement parent',parent);
     const link=this._selectOptions([['auto','Automatique'],['wifi','Wi-Fi'],['ethernet','Ethernet'],['cpl','CPL'],['other','Non précisé']],existing.link||'auto');this._field(dialog,'Type de liaison',link);
     const hide=document.createElement('label');hide.className='toggle';const check=document.createElement('input');check.type='checkbox';check.checked=!!existing.hidden;hide.append(check,document.createTextNode(' Masquer cet appareil'));dialog.appendChild(hide);
@@ -476,6 +594,11 @@ class LiveboxTopologieCardEditor extends HTMLElement {
     check.addEventListener('change',()=>this._update('auto_velop_rdc',check.checked));
     const span=document.createElement('span');span.textContent='Regrouper automatiquement les appareils ETH2 sous Velop RDC';
     row.append(check,span);form.appendChild(row);
+    const garageRow=document.createElement('label');garageRow.className='toggle';
+    const garageCheck=document.createElement('input');garageCheck.type='checkbox';garageCheck.checked=this._config.auto_velop_garage!==false;
+    garageCheck.addEventListener('change',()=>this._update('auto_velop_garage',garageCheck.checked));
+    const garageLabel=document.createElement('span');garageLabel.textContent='Regrouper Titan 1/2, Alexa bureau, congélateur et pompe piscine sous Velop Garage (si même interface)';
+    garageRow.append(garageCheck,garageLabel);form.appendChild(garageRow);
     const note=document.createElement('p');note.className='note';
     note.textContent='Pour attribuer un appareil à un autre parent, clique sur sa branche dans le graphe puis sur l’appareil → Configurer. Les réglages des appareils sont enregistrés dans Home Assistant et partagés avec le téléphone.';
     form.appendChild(note);

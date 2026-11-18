@@ -1,0 +1,11 @@
+const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
+const js=fs.readFileSync(__dirname+'/../custom_components/livebox_reseau/frontend/livebox-topologie-card.js','utf8');
+const elements=new Map(); const context={window:{customCards:[]},customElements:{get:k=>elements.get(k),define:(k,v)=>elements.set(k,v)},HTMLElement:class{},setTimeout,clearTimeout,console};
+vm.createContext(context);vm.runInContext(js,context);
+const Card=elements.get('livebox-topologie-card');
+assert(Card,'La classe de carte est bien enregistrée');
+const card=new Card();
+assert.equal(JSON.stringify(card.getGridOptions()),JSON.stringify({columns:'full',rows:'auto',min_columns:6}),'La carte occupe toute la largeur de la section');
+card._config={type:'custom:livebox-topologie-card',title:'Réseau'};
+assert.equal(card.getGridOptions().columns,'full','Fonctionne aussi sur une carte existante sans option YAML supplémentaire');
+console.log('GRID_OPTIONS_OK: 3 assertions, largeur full et hauteur auto');

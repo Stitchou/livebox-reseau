@@ -49,12 +49,12 @@ class Conn:
     def send_error(self,id,code,message):self.errors.append((code,message))
     def send_message(self,message):self.messages.append(message)
 spec=importlib.util.spec_from_file_location('livebox_reseau',str(Path(__file__).resolve().parents[1] / 'custom_components/livebox_reseau/__init__.py'))
-m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+m=importlib.util.module_from_spec(spec);sys.modules['livebox_reseau']=m;spec.loader.exec_module(m)
 async def main():
     hass=Hass();conn=Conn()
     resources=FakeResources();hass.data['lovelace']=types.SimpleNamespace(resource_mode='storage',resources=resources)
     assert await m.async_setup(hass,{})
-    assert len(hass.registered)==4 and len(hass.static_paths)==1
+    assert len(hass.registered)==5 and len(hass.static_paths)==1
     assert len(resources.entries)==2 and resources.entries[0]['url']=='/hacsfiles/other/file.js'
     assert resources.entries[1]['url'].startswith('/livebox-reseau/livebox-topologie-card.js')
     assert await m.async_setup_entry(hass,None)
@@ -76,6 +76,30 @@ async def main():
     assert conn.last['overrides']['mac:AA']['name']=='Velop RDC' and conn.last['revision']==4
     assert await m.async_unload_entry(hass,None)
     assert await m.async_setup_entry(hass,None)
+    # Topologie : même client Orange que l'intégration existante, un seul appel
+    # côté Livebox et cache partagé pour les vues PC/téléphone.
+    class TopologyAPI:
+        calls=0
+        async def async_set_topodiags_build(self, params):
+            self.calls+=1
+            assert params == {'Timeout':30,'LLTDIcon':False,'SendXmlFile':False}
+            return {'status':[{'Key':'livebox','Name':'Livebox 7','Children':[
+                {'Key':'switch','Name':'Switch','Children':[
+                    {'Key':'ha','Name':'HA','PhysAddress':'48:0F:CF:57:8E:2C'}]},
+                {'Key':'cpl','Name':'CPL Spare1','Children':[
+                    {'Key':'shelly','Name':'Shelly','PhysAddress':'AA:BB:CC:DD:EE:FF'}]}
+            ]}]}
+    topo_api=TopologyAPI()
+    coordinator=types.SimpleNamespace(api=types.SimpleNamespace(topologydiagnostics=topo_api))
+    hass.config_entries=types.SimpleNamespace(async_entries=lambda domain:[types.SimpleNamespace(runtime_data=coordinator)] if domain=='livebox' else [])
+    await m.websocket_topology(hass,conn,{'id':22,'type':'livebox_reseau/topology'})
+    assert conn.last['count']==5
+    assert topo_api.calls==1
+    assert conn.last['nodes'][2]['parent']==conn.last['nodes'][1]['id']
+    await m.websocket_topology(hass,conn,{'id':23,'type':'livebox_reseau/topology'})
+    assert topo_api.calls==1, 'Cache 15 minutes non appliqué'
+    assert 'overrides' not in conn.last
+    assert hass.data['livebox_reseau']['overrides']['mac:AA']['name']=='Velop RDC'
     m.websocket_get(hass,conn,{'id':9})
     assert conn.last['overrides']['mac:AA']['name']=='Velop RDC' and conn.last['revision']==4
     print('BACKEND_TESTS_OK: commandes, ressource HA, persistance + diffusion simulées')

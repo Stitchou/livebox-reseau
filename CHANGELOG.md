@@ -1,3 +1,11 @@
+## 0.7.2 — Regroupement Velop RDC et chaînage CPL Master → Spare1
+
+- ETH2 : le Velop RDC redevient automatiquement parent de ses clients Wi-Fi, y compris si le dashboard conserve une ancienne option `auto_velop_rdc: false`.
+- Nouvelle option explicite `group_velop_rdc: false` dans l’éditeur visuel pour désactiver volontairement cette règle.
+- ETH4 : `CPL Spare1` est maintenant enfant de `CPL Master` (les deux en violet), même si le diagnostic Livebox les présentait au même niveau. Un trait SVG violet relie réellement les deux bulles. La relation est une règle locale, pas une découverte automatique universelle.
+- `Spare1_2.4` reste fusionné dans Spare1 et lui fournit son IP ; le groupe des clients CPL reste violet.
+- Les corrections individuelles HAOS restent prioritaires ; Velop Garage, les autres branches, les tracés SVG arrondis et le stockage sont préservés.
+
 ## 0.7.1 — Raccords réseau arrondis (correctif visuel)
 
 - Tronc Livebox → ETH dessiné par SVG : aucun dépassement au-dessus du premier port ou sous le dernier.

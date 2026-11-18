@@ -1,5 +1,5 @@
-/* Livebox Réseau — Topologie groupée v0.7.0 (sans dépendance externe). */
-const LIVEBOX_TOPO_VERSION='0.7.0';
+/* Livebox Réseau — Topologie groupée v0.7.2 (sans dépendance externe). */
+const LIVEBOX_TOPO_VERSION='0.7.2';
 function liveboxReadDevices(hass) {
   if (!hass || !hass.states) return [];
   return Object.values(hass.states)
@@ -193,6 +193,12 @@ function liveboxTree(devices, overrides, autoVelop = true, topology = null, auto
   const velop = devices.find(d=>/velop[ _-]*rdc/i.test(d.name) || /velop[ _-]*rdc/i.test(d.entityId));
   const garage = devices.find(d=>/velop[ _-]*garage/i.test(d.name) || /velop[ _-]*garage/i.test(d.entityId));
   const garageKnown = /^(?:titan(?:[ _-]*2)?|alexa bureau|cong[eé]lateur|pompe piscine)$/i;
+  // Relation physique confirmée pour cette installation : l'adaptateur CPL
+  // Spare1 est relié au CPL Master. L'interface Spare1_2.4 fusionnée reste
+  // associée à Spare1, pour conserver son IP et ses descendants Children.
+  // Exiger la même interface pour ne jamais raccorder deux branches par erreur.
+  const cplMaster = devices.find(d=>/^cpl[ _-]*master$/i.test(d.name));
+  const cplSpare1 = devices.find(d=>/^cpl[ _-]*spare1$/i.test(d.name));
   const nodes = allDevices.map(d=>{
     const o = overrides[liveboxDeviceKey(d)] || overrides[d.entityId] || {};
     const groupKey = groupsAvailable.has(o.group) ? o.group : d.groupKey;
@@ -200,7 +206,9 @@ function liveboxTree(devices, overrides, autoVelop = true, topology = null, auto
     // Configuration manuelle > règle confirmée Velop RDC > liens Children > interface ETH.
     const autoParentRdc = autoVelop && velop && !d.source && velop.groupKey==='eth:ETH2' && groupKey==='eth:ETH2' && velop.entityId!==d.entityId ? velop.entityId : null;
     const autoParentGarage = autoGarage && garage && !d.source && garage.groupKey===groupKey && garageKnown.test(d.name) && garage.entityId!==d.entityId ? garage.entityId : null;
-    const autoParent=autoParentRdc || autoParentGarage;
+    const autoParentCpl = cplMaster && cplSpare1 && d.entityId===cplSpare1.entityId &&
+      groupKey==='eth:ETH4' && cplMaster.groupKey===groupKey ? cplMaster.entityId : null;
+    const autoParent=autoParentRdc || autoParentGarage || autoParentCpl;
     let parentId=autoParent || importedParent?.parentId || null;
     // Le faux switch déclaré par Orange autour d'un Velop ne représente pas un vrai parent.
     // Nous gardons le Velop directement sous son interface, puis ses clients confirmés.
@@ -209,7 +217,7 @@ function liveboxTree(devices, overrides, autoVelop = true, topology = null, auto
     else if (o.parent && o.parent!=='auto') parentId=byId.has(o.parent) && o.parent!==d.entityId ? o.parent : null;
     if(parentId && byId.get(parentId)?.groupKey!==groupKey)parentId=null;
     return {...d, originalName:d.name, name:o.name || d.name, groupKey, groupLabel:groupsAvailable.get(groupKey)||d.groupLabel,
-      parentId, link:o.link && o.link!=='auto' ? o.link : autoParent && parentId===autoParent ? 'wifi' : importedParent?.link||d.type,
+      parentId, link:o.link && o.link!=='auto' ? o.link : autoParentCpl && parentId===autoParentCpl ? 'cpl' : autoParent && parentId===autoParent ? 'wifi' : importedParent?.link||d.type,
       edgeSource:(o.parent&&o.parent!=='auto')?'manual':autoParent&&parentId===autoParent?'rule':importedParent&&parentId===importedParent.parentId?'children':'interface',
       hidden:o.hidden===true, children:[]};
   });
@@ -338,7 +346,7 @@ class LiveboxTopologieCard extends HTMLElement {
       .node-cluster.wifi{--cluster-color:var(--lb-green)}
       .node-cluster.cpl{--cluster-color:var(--lb-purple)}
       .node-cluster.ethernet{--cluster-color:var(--lb-blue)}
-      .node-cluster.cpl-master{--cluster-color:var(--lb-blue)}
+      .node-cluster.cpl-master{--cluster-color:var(--lb-purple)}
       .node-cluster.cpl-master>.cluster-main:after{border-top:2px dashed var(--lb-purple)}
       .cluster-children{min-width:0;border:2px solid var(--cluster-color);border-radius:15px;background:color-mix(in srgb,var(--cluster-color) 5%,transparent);padding:8px 9px 10px}
       .cluster-children.cpl{border-color:var(--lb-purple)}
@@ -451,7 +459,16 @@ class LiveboxTopologieCard extends HTMLElement {
     dialog.append(info,field);
     this._buttons(dialog,[['Copier',async()=>{try{await navigator.clipboard.writeText(payload);info.textContent='Diagnostic copié.';}catch(_){field.select();info.textContent='Copie le texte sélectionné avec Ctrl+C.';}},true],['Fermer',close,false]]);
   }
-  _getGroups(){return liveboxTree(this._devices,{...(this._config?.device_overrides||{}),...this._overrides},this._config?.auto_velop_rdc!==false,this._topology,this._config?.auto_velop_garage!==false);}
+  _getGroups(){
+    // Migration 0.7.2 : auto_velop_rdc=false pouvait rester dans un ancien
+    // dashboard et aplatir ETH2 malgré la topologie confirmée par l'utilisateur.
+    // Le regroupement est désormais actif par défaut ; une NOUVELLE option
+    // group_velop_rdc=false reste disponible pour le désactiver volontairement.
+    const groupRdc=this._config?.group_velop_rdc!==false;
+    return liveboxTree(this._devices,
+      {...(this._config?.device_overrides||{}),...this._overrides},
+      groupRdc,this._topology,this._config?.auto_velop_garage!==false);
+  }
 
   _filterTree(){
     const q=this._query.trim().toLocaleLowerCase('fr');
@@ -604,6 +621,13 @@ class LiveboxTopologieCard extends HTMLElement {
       if(!pill||!group)return;
       const a=rect(pill),b=rect(group);
       const color=cluster.classList.contains('cpl-master')||cluster.classList.contains('cpl')?purple:cluster.classList.contains('wifi')?green:blue;
+      if(cluster.classList.contains('cpl-master')){
+        // Pour le CPL maître, raccorder ses enfants directs (notamment
+        // Spare1) : ne pas relier une bordure transparente au hasard.
+        const children=[...group.querySelectorAll(':scope > .forest > .node-cluster > .cluster-main > .node-pill'),
+          ...group.querySelectorAll(':scope > .forest > .direct-tiles > .node-pill')];
+        if(children.length){children.forEach(el=>smooth(a,rect(el),purple,mobile));return;}
+      }
       if(mobile)smooth(a,b,color,true);
       else smooth(a,b,color);
     });
@@ -749,8 +773,8 @@ class LiveboxTopologieCardEditor extends HTMLElement {
     addField('Nom du routeur','router_name','Livebox 7');
     addField('Adresse IP du routeur','router_ip','192.168.1.1');
     const row=document.createElement('label');row.className='toggle';
-    const check=document.createElement('input');check.type='checkbox';check.checked=this._config.auto_velop_rdc!==false;
-    check.addEventListener('change',()=>this._update('auto_velop_rdc',check.checked));
+    const check=document.createElement('input');check.type='checkbox';check.checked=this._config.group_velop_rdc!==false;
+    check.addEventListener('change',()=>this._update('group_velop_rdc',check.checked));
     const span=document.createElement('span');span.textContent='Regrouper automatiquement les appareils ETH2 sous Velop RDC';
     row.append(check,span);form.appendChild(row);
     const garageRow=document.createElement('label');garageRow.className='toggle';

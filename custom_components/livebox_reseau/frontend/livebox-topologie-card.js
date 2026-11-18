@@ -1,5 +1,5 @@
-/* Livebox Réseau — Topologie hiérarchique v0.6.0 (sans dépendance externe). */
-const LIVEBOX_TOPO_VERSION='0.6.0';
+/* Livebox Réseau — Topologie groupée v0.7.0 (sans dépendance externe). */
+const LIVEBOX_TOPO_VERSION='0.7.0';
 function liveboxReadDevices(hass) {
   if (!hass || !hass.states) return [];
   return Object.values(hass.states)
@@ -142,6 +142,49 @@ function liveboxTopologyParents(devices,topology){
   }
   return {links,virtual,count:represented.size};
 }
+// Fusion purement visuelle : un adaptateur CPL Wi-Fi et son interface _2.4
+// sont une seule boîte physique. La branche 2,4 GHz peut être la seule à
+// posséder une adresse IP ; ses descendants Children ne sont jamais perdus.
+function liveboxFuseCplWifi(groups) {
+  const all=[];
+  const walk=n=>{all.push(n);(n.children||[]).forEach(walk);};
+  groups.forEach(g=>g.roots.forEach(walk));
+  const norm=s=>String(s||'').trim().replace(/\s+/g,' ').toLocaleLowerCase('fr');
+  const suffix=/[_\s-]+2[.,]4(?:\s*ghz)?$/i;
+  for(const secondary of [...all]) {
+    if(!/\bcpl\b/i.test(secondary.name)||!suffix.test(secondary.name))continue;
+    const baseName=norm((secondary.originalName||secondary.name).replace(suffix,''));
+    const base=all.find(n=>n!==secondary && n.groupKey===secondary.groupKey && norm(n.originalName||n.name)===baseName);
+    if(!base)continue;
+    // Evite une fusion sur une structure circulaire ou incohérente.
+    const ancestors=new Set();let cursor=base;
+    while(cursor && !ancestors.has(cursor.entityId)){
+      ancestors.add(cursor.entityId);
+      cursor=all.find(n=>n.entityId===cursor.parentId);
+    }
+    if(ancestors.has(secondary.entityId))continue;
+    const remove=list=>{const i=list.indexOf(secondary);if(i>=0){list.splice(i,1);return true;}return list.some(n=>remove(n.children||[]));};
+    for(const group of groups)if(remove(group.roots))break;
+    for(const child of secondary.children||[]){
+      if(child.entityId===base.entityId)continue;
+      child.parentId=base.entityId;
+      if(!(base.children||[]).some(n=>n.entityId===child.entityId))base.children.push(child);
+    }
+    base.children.sort(liveboxSort);
+    if(secondary.ip)base.ip=secondary.ip;
+    base.online=base.online||secondary.online;
+    base.cplWifi=true;
+    base.mergedEntityIds=[...(base.mergedEntityIds||[base.entityId]),secondary.entityId];
+    base.mergeNote='Interface Wi-Fi 2,4 GHz fusionnée (IP conservée)';
+  }
+  // La dénomination Spare1 est connue sur cette installation. Aucun autre
+  // appareil n'est arbitrairement considéré comme point d'accès CPL.
+  for(const node of all){
+    if(/^cpl\s+spare1$/i.test(node.name) && !node.cplWifi)node.cplWifi=true;
+  }
+  return groups;
+}
+
 function liveboxTree(devices, overrides, autoVelop = true, topology = null, autoGarage = true) {
   const imported=liveboxTopologyParents(devices,topology);
   const allDevices=[...devices,...imported.virtual];
@@ -184,8 +227,9 @@ function liveboxTree(devices, overrides, autoVelop = true, topology = null, auto
     groups.get(n.groupKey).roots.push(n);
   }
   const rank={ethernet:0,wifi:1,other:2};
-  return [...groups.values()].map(g=>({...g,roots:g.roots.sort(liveboxSort)}))
+  const result=[...groups.values()].map(g=>({...g,roots:g.roots.sort(liveboxSort)}))
     .sort((a,b)=>(rank[a.type]??3)-(rank[b.type]??3)||a.label.localeCompare(b.label,'fr',{numeric:true}));
+  return liveboxFuseCplWifi(result);
 }
 function liveboxPrune(node,search,onlineOnly,showHidden=false) {
   const children=node.children.map(d=>liveboxPrune(d,search,onlineOnly,showHidden)).filter(Boolean);
@@ -222,6 +266,7 @@ class LiveboxTopologieCard extends HTMLElement {
   connectedCallback(){if(this._ready){this._resizeObserver?.observe(this);this._connectBackend();this._readData();}}
   disconnectedCallback(){
     this._resizeObserver?.disconnect();
+    if(this._wireFrame!==null){cancelAnimationFrame(this._wireFrame);this._wireFrame=null;}
     if(this._updateTimer)clearTimeout(this._updateTimer);
     this._updateTimer=null;
     if(this._wsUnsub){this._wsUnsub();this._wsUnsub=null;}
@@ -230,7 +275,11 @@ class LiveboxTopologieCard extends HTMLElement {
   }
   _init(){
     this._ready=true;this._devices=[];this._overrides={};this._topology=null;this._topologyStatus='waiting';this._backendStatus='waiting';this._query='';
-    this._showOnline=false;this._showHidden=false;this._expanded=null;this._focus=null;
+    this._showOnline=false;this._showHidden=false;this._expanded=null;this._focus=null;this._wireFrame=null;
+    if(typeof ResizeObserver!=='undefined'){
+      this._resizeObserver=new ResizeObserver(()=>this._queueWireLayout());
+      if(this.isConnected)this._resizeObserver.observe(this);
+    }
     this.shadowRoot.innerHTML=`
     <style>
       :host{display:block;min-width:0;color:var(--primary-text-color);font-family:var(--primary-font-family,inherit)}
@@ -252,53 +301,71 @@ class LiveboxTopologieCard extends HTMLElement {
       input[type=checkbox]{accent-color:var(--primary-color)}
       .sync-error{display:none;padding:9px;margin-bottom:10px;border:1px solid var(--error-color,#e55);border-radius:9px;font-size:12px;align-items:center;justify-content:space-between;gap:8px}
       .sync-error.visible{display:flex}
-      .map{border:1px solid var(--divider-color);border-radius:14px;padding:18px 14px;min-height:180px;background:transparent}
-      .network{display:grid;grid-template-columns:180px minmax(0,1fr);gap:14px;align-items:center}
-      .router-wrap{align-self:center;position:relative;z-index:1}
-      .router{padding:16px 14px;border:2px solid var(--primary-color);border-radius:14px;background:var(--secondary-background-color);width:100%;text-align:left;box-shadow:0 0 18px color-mix(in srgb,var(--primary-color) 8%,transparent)}
+      :host{--lb-blue:#05bafa;--lb-green:#65db39;--lb-purple:#c85df5}
+      .map{border:1px solid var(--divider-color);border-radius:15px;padding:18px 12px;min-height:180px;background:transparent;overflow:hidden}
+      .network{display:grid;grid-template-columns:160px minmax(0,1fr);gap:15px;align-items:center;position:relative;isolation:isolate}
+      .network-wires{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index:0;display:block}
+      .network-wires path{fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-width:2.3;vector-effect:non-scaling-stroke}
+      .router-wrap,.branches{position:relative;z-index:1}
+      .router-wrap{align-self:center;z-index:1}
+      .router{padding:18px 12px;border:2px solid var(--lb-blue);border-radius:14px;background:color-mix(in srgb,var(--lb-blue) 9%,var(--card-background-color));width:100%;text-align:left;box-shadow:0 0 18px color-mix(in srgb,var(--lb-blue) 17%,transparent)}
       .router .title{font-size:15px;font-weight:700}.router .addr{font-size:11px;color:var(--secondary-text-color);margin-top:4px}
-      .router .diamond{color:var(--primary-color);font-size:21px;margin-right:7px}
-      .branches{border-left:2px solid var(--primary-color);padding-left:24px;min-width:0}
-      .branch{position:relative;display:grid;grid-template-columns:172px minmax(0,1fr);gap:12px;align-items:start;margin:10px 0;min-width:0}
-      .branch:before{content:'';position:absolute;left:-24px;width:24px;top:23px;border-top:2px solid var(--primary-color)}
-      .branch-head{display:flex;align-items:center;gap:7px;width:100%;border:1px solid var(--divider-color);border-radius:10px;padding:9px 10px;min-height:48px;background:var(--secondary-background-color);text-align:left}
-      .branch-head .iface{font-size:18px;color:var(--primary-color)}
+      .router .diamond{color:var(--lb-blue);font-size:21px;margin-right:7px}
+      .branches{position:relative;border-left:0;padding-left:19px;min-width:0}
+      .branch{position:relative;display:grid;grid-template-columns:174px minmax(0,1fr);gap:11px;align-items:center;margin:12px 0;min-width:0}
+      .branch:before{display:none}
+      .branch-head{display:flex;align-items:center;gap:8px;width:100%;border:1px solid var(--lb-blue);border-radius:12px;padding:8px 9px;min-height:50px;background:color-mix(in srgb,var(--lb-blue) 9%,var(--secondary-background-color));text-align:left;box-shadow:0 0 10px color-mix(in srgb,var(--lb-blue) 9%,transparent)}
+      .branch-head .iface{font-size:19px;color:var(--lb-blue)}
       .branch-head .label{font-size:12px;font-weight:700}.branch-head .count{color:var(--secondary-text-color);font-size:10px;margin-top:2px}
       .branch-head .chevron{margin-left:auto;color:var(--secondary-text-color);font-size:14px}
-      .branch-body{min-width:0;position:relative;padding-left:13px}
-      .branch-body:before{content:'';position:absolute;left:0;top:22px;width:12px;border-top:2px solid var(--primary-color)}
-      .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:7px;align-items:start}
-      .node-pill{display:flex;align-items:center;gap:8px;min-width:0;min-height:43px;width:100%;padding:7px 9px;text-align:left;border-radius:9px;border:1px solid var(--divider-color);background:var(--secondary-background-color);color:var(--primary-text-color)}
-      .node-pill .ico{flex:0 0 21px;font-size:18px;color:var(--secondary-text-color);text-align:center}
-      .node-pill .names{flex:1 1 auto;min-width:0}.node-pill .name{font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
-      .node-pill .meta{font-size:10px;color:var(--secondary-text-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;margin-top:2px}
+      .branch-body{min-width:0;position:relative;padding-left:9px}
+      .branch-body:before{display:none}
+      .forest{display:flex;flex-direction:column;gap:9px;min-width:0}
+      .direct-tiles,.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,140px),1fr));gap:6px;min-width:0}
+      .direct-tiles{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+      .node-pill{display:flex;align-items:center;gap:7px;min-width:0;min-height:42px;width:100%;padding:7px 8px;text-align:left;border-radius:10px;border:1px solid color-mix(in srgb,var(--primary-text-color) 25%,var(--divider-color));background:color-mix(in srgb,var(--secondary-background-color) 86%,var(--card-background-color));color:var(--primary-text-color);box-shadow:0 2px 9px rgba(0,0,0,.07)}
+      .node-pill:hover{box-shadow:0 0 13px color-mix(in srgb,var(--primary-color) 20%,transparent)}
+      .node-pill .ico{flex:0 0 19px;font-size:17px;color:var(--secondary-text-color);text-align:center}
+      .node-pill .names{flex:1 1 auto;min-width:0}.node-pill .name{font-size:11px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+      .node-pill .meta{font-size:10px;color:var(--secondary-text-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;margin-top:3px}
       .node-pill .state{width:8px;height:8px;border-radius:100%;flex:0 0 8px;background:var(--secondary-text-color)}
-      .node-pill .state.on{background:var(--success-color,#27b97c)}
-      .node-cluster{min-width:0;grid-column:1/-1;border:1px solid var(--divider-color);border-radius:12px;padding:8px;background:color-mix(in srgb,var(--secondary-background-color) 45%,transparent)}
-      .cluster-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-      .cluster-main .node-pill{max-width:225px;flex:0 1 225px}
-      .source{color:var(--secondary-text-color);font-size:10px;max-width:210px}
-      .node-cluster.cpl{border-left:3px solid #ab79ed}.node-cluster.wifi{border-left:3px solid var(--success-color,#35b985)}
-      .cluster-children{border-left:2px solid var(--divider-color);margin:9px 0 0 13px;padding-left:11px}
-      .cluster-children.cpl{border-left-color:#ab79ed;border-left-style:dashed}
-      .cluster-children.wifi{border-left-color:var(--success-color,#35b985);border-left-style:dashed}
-      .node-cluster .tiles{grid-template-columns:repeat(auto-fill,minmax(155px,1fr))}
-      .line-note{font-size:10px;color:var(--secondary-text-color)}
+      .node-pill .state.on{background:var(--success-color,#39cf64)}
+      .node-cluster{display:grid;grid-template-columns:152px minmax(0,1fr);gap:10px;align-items:center;min-width:0;position:relative}
+      .node-cluster>.cluster-main{position:relative;min-width:0;z-index:1}
+      .node-cluster>.cluster-main:after{display:none}
+      .node-cluster>.cluster-main .node-pill{border-color:var(--cluster-color);background:color-mix(in srgb,var(--cluster-color) 13%,var(--card-background-color));box-shadow:0 0 12px color-mix(in srgb,var(--cluster-color) 13%,transparent)}
+      .node-cluster .cluster-main .ico{color:var(--cluster-color)}
+      .node-cluster.wifi{--cluster-color:var(--lb-green)}
+      .node-cluster.cpl{--cluster-color:var(--lb-purple)}
+      .node-cluster.ethernet{--cluster-color:var(--lb-blue)}
+      .node-cluster.cpl-master{--cluster-color:var(--lb-blue)}
+      .node-cluster.cpl-master>.cluster-main:after{border-top:2px dashed var(--lb-purple)}
+      .cluster-children{min-width:0;border:2px solid var(--cluster-color);border-radius:15px;background:color-mix(in srgb,var(--cluster-color) 5%,transparent);padding:8px 9px 10px}
+      .cluster-children.cpl{border-color:var(--lb-purple)}
+      .cluster-children.wifi{border-color:var(--lb-green)}
+      .cluster-children.plain{border:0;background:transparent;padding:0}
+      .cluster-label{font-size:12px;font-weight:700;color:var(--cluster-color);display:flex;align-items:center;gap:7px;margin-bottom:8px}
+      .cluster-label .label-icon{font-size:16px}.cluster-label .cluster-count{font-weight:500;color:var(--secondary-text-color)}
+      .cluster-children.cpl>.cluster-label{color:var(--lb-purple)}
+      .cluster-children.wifi>.cluster-label{color:var(--lb-green)}
+      .cluster-children.plain>.cluster-label{display:none}
+      .nested-forest{display:flex;flex-direction:column;gap:8px}
       .legend{display:flex;gap:13px;flex-wrap:wrap;font-size:11px;color:var(--secondary-text-color);padding:10px 2px 0}
-      .legend i{display:inline-block;width:14px;border-top:2px solid var(--primary-color);vertical-align:middle;margin-right:4px}
-      .legend i.wifi{border-top:2px dashed var(--success-color,#35b985)}.legend i.cpl{border-top:2px dashed #ab79ed}.legend i.other{border-top:2px dotted var(--secondary-text-color)}
+      .legend i{display:inline-block;width:14px;border-top:2px solid var(--lb-blue);vertical-align:middle;margin-right:4px}
+      .legend i.wifi{border-top:2px dashed var(--lb-green)}.legend i.cpl{border-top:2px dashed var(--lb-purple)}.legend i.other{border-top:2px dotted var(--secondary-text-color)}
       .detail{display:none;padding:10px;margin-top:10px;border:1px solid var(--divider-color);border-radius:11px;background:var(--secondary-background-color);gap:12px;align-items:center;flex-wrap:wrap}
       .detail.visible{display:flex}.detail-info{flex:1;min-width:150px}.detail strong{display:block;font-size:14px}.detail small{color:var(--secondary-text-color);display:block;font-size:11px;margin-top:3px}.detail-actions{display:flex;gap:7px;flex-wrap:wrap}
       .overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:999;display:flex;align-items:center;justify-content:center;padding:12px}
       .dialog{background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:14px;padding:18px;width:min(100%,470px);max-height:85vh;overflow:auto;box-shadow:0 16px 55px rgba(0,0,0,.35)}
       .dialog h3{font-size:18px;margin:0 0 12px}.field{display:flex;flex-direction:column;gap:5px;margin:10px 0;font-size:12px}.field input,.field select{width:100%;border:1px solid var(--divider-color);background:var(--secondary-background-color);padding:9px 10px;border-radius:8px;font-size:13px;min-height:37px}
       .actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-top:16px}.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);border-color:transparent}.warning{font-size:12px;color:var(--error-color,#e55);line-height:1.5}
-      @media(max-width:850px){.network{grid-template-columns:125px minmax(0,1fr)}.branch{grid-template-columns:140px minmax(0,1fr)}}
-      @media(max-width:650px){ha-card{padding:10px}.head{align-items:center}h2{font-size:17px}.tools{gap:5px} .btn{padding:7px 8px;font-size:11px}#search{max-width:none;flex:1 1 100%}
-        .map{padding:10px}.network{display:block}.router-wrap{max-width:230px;margin:0 auto 15px}.branches{margin-left:12px;border-left:2px solid var(--primary-color);padding-left:14px}
-        .branch{display:block;margin:11px 0}.branch:before{left:-14px;width:14px;top:21px}.branch-head{min-height:44px}.branch-body{margin-top:8px;padding-left:12px}.branch-body:before{top:13px}
-        .tiles,.node-cluster .tiles{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px}.node-pill{min-height:42px;padding:6px}
-        .node-cluster{padding:6px}.cluster-children{margin-left:7px;padding-left:8px}
+      @media(max-width:1000px){.network{grid-template-columns:125px minmax(0,1fr)}.branch{grid-template-columns:140px minmax(0,1fr)}.node-cluster{grid-template-columns:130px minmax(0,1fr)}.direct-tiles,.tiles{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}}
+      @media(max-width:650px){ha-card{padding:10px}.head{align-items:center}h2{font-size:17px}.tools{gap:5px}.btn{padding:7px 8px;font-size:11px}#search{max-width:none;flex:1 1 100%}
+        .map{padding:10px}.network{display:block}.router-wrap{max-width:230px;margin:0 auto 15px}.branches{margin-left:12px;padding-left:13px}
+        .branch{display:block;margin:11px 0}.branch:before{display:none}.branch-head{min-height:44px}.branch-body{margin-top:8px;padding-left:12px}.branch-body:before{display:none}
+        .node-cluster{display:flex;flex-direction:column;align-items:stretch;gap:6px}.node-cluster>.cluster-main{max-width:230px}.node-cluster>.cluster-main:after{display:none}
+        .direct-tiles,.tiles{grid-template-columns:repeat(auto-fill,minmax(min(100%,135px),1fr));gap:6px}.node-pill{min-height:42px;padding:6px}
+        .cluster-children{padding:8px}.forest{gap:7px}
       }
     </style>
     <ha-card>
@@ -306,9 +373,9 @@ class LiveboxTopologieCard extends HTMLElement {
       <div class="sync-error" id="sync-error" role="status"><span id="sync-error-text">Enregistrement indisponible</span><button class="btn" id="retry-sync">Réessayer</button></div>
       <nav class="tools"><button class="btn" id="expand-all">⊞ Tout déployer</button><button class="btn" id="collapse-all">⊟ Tout replier</button><button class="btn" id="reload-topology" type="button">↻ Actualiser</button><button class="btn" id="copy-topology" type="button">⧉ Diagnostic</button><input type="search" id="search" placeholder="Rechercher un appareil, une IP…" aria-label="Rechercher"><label class="toggle"><input type="checkbox" id="online">En ligne</label><label class="toggle"><input type="checkbox" id="hidden">Masqués</label></nav>
       <p class="tip" id="topology-state">Topologie : connexion à la Livebox…</p>
-      <div class="map" role="region" aria-label="Topologie Livebox"><div class="network"><div class="router-wrap" id="router-wrap"></div><div class="branches" id="branches"></div></div></div>
+      <div class="map" role="region" aria-label="Topologie Livebox"><div class="network"><svg id="network-wires" class="network-wires" aria-hidden="true" focusable="false"></svg><div class="router-wrap" id="router-wrap"></div><div class="branches" id="branches"></div></div></div>
       <div class="detail" id="detail"></div>
-      <div class="legend"><span><i></i> Interface Livebox</span><span><i class="wifi"></i> Règle Wi-Fi</span><span><i class="cpl"></i> CPL / branche</span><span><i class="other"></i> Lien à confirmer</span></div>
+      <div class="legend"><span><i></i> Interface Livebox</span><span><i class="wifi"></i> Regroupement Wi-Fi</span><span><i class="cpl"></i> Groupe CPL</span><span><i class="other"></i> Lien à confirmer</span></div>
       <div id="modal-host"></div>
     </ha-card>`;
     const s=this.shadowRoot;
@@ -426,28 +493,146 @@ class LiveboxTopologieCard extends HTMLElement {
       line.appendChild(head);
       if(expanded){
         const body=document.createElement('div');body.className='branch-body';
-        const tiles=document.createElement('div');tiles.className='tiles';
-        for(const node of group.roots)tiles.appendChild(this._renderNode(node));
-        body.appendChild(tiles);line.appendChild(body);
+        body.appendChild(this._renderForest(group.roots));line.appendChild(body);
       }
       branches.appendChild(line);
     }
     if(!groups.length){const msg=document.createElement('p');msg.className='tip';msg.textContent='Aucun appareil correspondant.';branches.appendChild(msg);}
+    this._queueWireLayout();
+  }
+  // Les fils sont dessinés à partir de la position RÉELLE des éléments.
+  // Cela empêche la ligne verticale de dépasser ETH0 / ETH4 lorsque les
+  // sous-branches changent de taille et préserve les raccords arrondis.
+  _queueWireLayout(){
+    if(!this.isConnected || this._wireFrame!==null)return;
+    this._wireFrame=requestAnimationFrame(()=>{
+      this._wireFrame=null;
+      if(this.isConnected)this._drawWires();
+    });
+  }
+  _drawWires(){
+    const network=this.shadowRoot?.querySelector('.network');
+    const svg=this.shadowRoot?.getElementById('network-wires');
+    const router=this.shadowRoot?.querySelector('.router');
+    if(!network||!svg||!router)return;
+    const frame=network.getBoundingClientRect();
+    const width=network.clientWidth,height=network.clientHeight;
+    svg.setAttribute('width',width);svg.setAttribute('height',height);
+    svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
+    svg.replaceChildren();
+    if(width<=0 || height<=0)return;
+    const rect=el=>{const r=el.getBoundingClientRect();return {l:r.left-frame.left,r:r.right-frame.left,t:r.top-frame.top,b:r.bottom-frame.top,cx:(r.left+r.right)/2-frame.left,cy:(r.top+r.bottom)/2-frame.top};};
+    const line=(path,color,dashed=false,kind='wire')=>{
+      if(!path||/NaN|Infinity/.test(path))return;
+      const p=svgEl('path',{d:path,stroke:color,'data-wire':kind});
+      if(dashed)p.setAttribute('stroke-dasharray','5 5');
+      svg.appendChild(p);
+    };
+    const blue='var(--lb-blue)',green='var(--lb-green)',purple='var(--lb-purple)';
+    const mobile=getComputedStyle(network).display==='block';
+    const heads=[...network.querySelectorAll('.branch-head')];
+    if(!heads.length)return;
+    const coords=heads.map(el=>rect(el));
+    const routerPos=rect(router);
+    const first=coords[0],last=coords.at(-1);
+    const minY=first.cy,maxY=last.cy;
+    const radius=Math.min(12,(maxY-minY)/2);
+    if(mobile){
+      // Sur téléphone : sortir sous la box avant de rejoindre les ETH.
+      const x=Math.max(8,Math.min(...coords.map(c=>c.l))-16);
+      const yStart=routerPos.b,yFirst=minY;
+      const routeY=Math.min(yFirst-10,yStart+15);
+      const sx=routerPos.cx;
+      line(`M ${sx} ${yStart} C ${sx} ${routeY} ${x} ${routeY} ${x} ${yFirst}`,blue);
+      if(maxY>minY)line(`M ${x} ${minY} V ${maxY}`,blue,false,'main-trunk');
+      coords.forEach(c=>line(`M ${x} ${c.cy} Q ${x} ${c.cy-6} ${x+10} ${c.cy-6} Q ${x+16} ${c.cy-6} ${x+16} ${c.cy} L ${c.l} ${c.cy}`,blue));
+    }else{
+      const minHeadX=Math.min(...coords.map(c=>c.l));
+      const x=Math.min(minHeadX-9,Math.max(routerPos.r+8, (routerPos.r+minHeadX)/2));
+      const sy=clamp(routerPos.cy,minY,maxY);
+      line(`M ${routerPos.r} ${routerPos.cy} C ${(routerPos.r+x)/2} ${routerPos.cy} ${(routerPos.r+x)/2} ${sy} ${x} ${sy}`,blue);
+      if(coords.length===1){
+        line(`M ${x} ${minY} H ${first.l}`,blue);
+      }else{
+        // Le tronc finit exactement sur le premier/dernier coude.
+        line(`M ${x} ${minY+radius} V ${maxY-radius}`,blue,false,'main-trunk');
+        coords.forEach((c,i)=>{
+          if(i===0)line(`M ${x} ${minY+radius} Q ${x} ${minY} ${x+radius} ${minY} H ${c.l}`,blue);
+          else if(i===coords.length-1)line(`M ${x} ${maxY-radius} Q ${x} ${maxY} ${x+radius} ${maxY} H ${c.l}`,blue);
+          else line(`M ${x} ${c.cy-10} Q ${x} ${c.cy} ${x+10} ${c.cy} H ${c.l}`,blue);
+        });
+      }
+    }
+    // Un lien part de chaque port ETH vers CHAQUE enfant immédiat,
+    // jamais entre deux appareils finaux d'une même grille.
+    const smooth=(a,b,color,vertical=false)=>{
+      if(vertical){
+        const dy=Math.max(5,b.t-a.b);
+        line(`M ${a.cx} ${a.b} C ${a.cx} ${a.b+dy*.45} ${b.cx} ${b.t-dy*.45} ${b.cx} ${b.t}`,color);
+      }else{
+        const dx=Math.max(4,b.l-a.r);
+        line(`M ${a.r} ${a.cy} C ${a.r+dx*.48} ${a.cy} ${b.l-dx*.48} ${b.cy} ${b.l} ${b.cy}`,color);
+      }
+    };
+    network.querySelectorAll('.branch').forEach(branch=>{
+      const head=branch.querySelector(':scope > .branch-head');
+      const body=branch.querySelector(':scope > .branch-body');
+      if(!head||!body)return;
+      const start=rect(head);
+      const forest=body.querySelector(':scope > .forest');
+      if(!forest)return;
+      const direct=forest.querySelector(':scope > .direct-tiles > .node-pill');
+      const parents=[...forest.querySelectorAll(':scope > .node-cluster > .cluster-main > .node-pill')];
+      const targets=[direct,...parents].filter(Boolean).map(rect);
+      if(mobile && targets.length){
+        // La liaison mobile circule dans la gouttière GAUCHE, pas à travers
+        // les cartes d'une sous-branche longue (ETH4 notamment).
+        const x=Math.min(start.l+8,...targets.map(t=>t.l-8));
+        const y0=start.b+4;
+        const yLast=Math.max(...targets.map(t=>t.cy));
+        line(`M ${start.l+10} ${start.b} Q ${x} ${start.b} ${x} ${y0}`,blue);
+        if(yLast>y0)line(`M ${x} ${y0} V ${yLast}`,blue);
+        targets.forEach(t=>line(`M ${x} ${t.cy-7} Q ${x} ${t.cy} ${x+7} ${t.cy} H ${t.l}`,blue));
+      }else{
+        targets.forEach(dest=>smooth(start,dest,blue));
+      }
+    });
+    // Les groupements CPL et Wi-Fi possèdent chacun leur raccord courbe.
+    network.querySelectorAll('.node-cluster').forEach(cluster=>{
+      const pill=cluster.querySelector(':scope > .cluster-main > .node-pill');
+      const group=cluster.querySelector(':scope > .cluster-children');
+      if(!pill||!group)return;
+      const a=rect(pill),b=rect(group);
+      const color=cluster.classList.contains('cpl-master')||cluster.classList.contains('cpl')?purple:cluster.classList.contains('wifi')?green:blue;
+      if(mobile)smooth(a,b,color,true);
+      else smooth(a,b,color);
+    });
   }
   _nodeMedium(d){
-    if(d.link==='cpl'||d.topologyRole==='cpl'||/\bcpl\b/i.test(d.name))return 'cpl';
-    if(d.link==='wifi'||d.type==='wifi'||/velop|point d.acc[eè]s/i.test(d.name))return 'wifi';
+    if(d.cplWifi || d.link==='cpl'||d.topologyRole==='cpl'||/\bcpl\b/i.test(d.name))return 'cpl';
+    if(d.link==='wifi'||d.type==='wifi'||/velop|point[\s-]*(?:d.acc[eè]s|wi[\s-]*fi)/i.test(d.name))return 'wifi';
     return 'ethernet';
   }
-  _renderNode(d){
-    const nested=d.children?.length>0;
+  _descendants(d){
+    const result=[];const visit=n=>{for(const c of n.children||[]){result.push(c);visit(c);}};visit(d);
+    return result;
+  }
+  _renderForest(nodes){
+    const result=document.createElement('div');result.className='forest';
+    const direct=nodes.filter(n=>!(n.children||[]).length);
+    const parents=nodes.filter(n=>(n.children||[]).length);
+    if(direct.length){
+      const tiles=document.createElement('div');tiles.className='direct-tiles';
+      direct.forEach(d=>tiles.appendChild(this._renderLeaf(d)));
+      result.appendChild(tiles);
+    }
+    parents.forEach(d=>result.appendChild(this._renderNode(d)));
+    return result;
+  }
+  _renderLeaf(d){
     const medium=this._nodeMedium(d);
-    const wrapper=document.createElement('div');
-    if(nested)wrapper.className='node-cluster '+medium;
-    const main=nested?document.createElement('div'):wrapper;
-    if(nested){main.className='cluster-main';wrapper.appendChild(main);}
     const btn=document.createElement('button');btn.type='button';btn.className='node-pill';btn.dataset.entity=d.entityId;
-    btn.title=[d.name,d.ip,d.edgeSource==='children'?'Parent déclaré par la Livebox':d.edgeSource==='rule'?'Règle Velop / à vérifier':d.edgeSource==='manual'?'Correction manuelle':'Interface déclarée'].filter(Boolean).join(' · ');
+    btn.title=[d.name,d.ip,d.edgeSource==='children'?'Parent déclaré par la Livebox':d.edgeSource==='rule'?'Règle locale : à vérifier':d.edgeSource==='manual'?'Correction manuelle':'Interface déclarée'].filter(Boolean).join(' · ');
     const ico=document.createElement('span');ico.className='ico';
     ico.textContent=medium==='cpl'?'♧':medium==='wifi'?'◉':d.topologyRole==='switch'?'▦':'▣';
     const names=document.createElement('span');names.className='names';
@@ -456,16 +641,39 @@ class LiveboxTopologieCard extends HTMLElement {
     meta.textContent=d.ip||((d.source==='livebox')?'Nœud Livebox':'IP inconnue');
     const state=document.createElement('span');state.className='state'+(d.online?' on':'');
     names.append(title,meta);btn.append(ico,names,state);
-    btn.addEventListener('click',()=>this._select(d));main.appendChild(btn);
-    if(nested){
-      const provenance=document.createElement('span');provenance.className='source';
-      provenance.textContent=d.source==='livebox'?'Intermédiaire détecté dans Children':medium==='cpl'?'Sous-branche CPL':medium==='wifi'?'Sous-branche Wi-Fi':'Équipement parent';
-      main.appendChild(provenance);
-      const children=document.createElement('div');children.className='cluster-children '+medium;
-      const tiles=document.createElement('div');tiles.className='tiles';
-      for(const child of d.children)tiles.appendChild(this._renderNode(child));
-      children.appendChild(tiles);wrapper.appendChild(children);
+    btn.addEventListener('click',()=>this._select(d));
+    return btn;
+  }
+  _renderNode(d){
+    if(!(d.children||[]).length)return this._renderLeaf(d);
+    const medium=this._nodeMedium(d);
+    const isCplWifi=!!d.cplWifi;
+    const isVelop=/\bvelop\b|point[\s-]*(?:d.acc[eè]s|wi[\s-]*fi)/i.test(d.name);
+    const isCplMaster=medium==='cpl'&&!isCplWifi;
+    const wrapper=document.createElement('div');
+    wrapper.className='node-cluster '+medium+(isCplMaster?' cpl-master':'')+(isCplWifi?' cpl-wifi':'');
+    wrapper.dataset.parent=d.entityId;
+    const main=document.createElement('div');main.className='cluster-main';main.appendChild(this._renderLeaf(d));wrapper.appendChild(main);
+    const children=document.createElement('section');children.className='cluster-children '+(isCplMaster?'plain':medium);
+    const descendants=this._descendants(d);
+    if(!isCplMaster){
+      const label=document.createElement('div');label.className='cluster-label';
+      const labelIcon=document.createElement('span');labelIcon.className='label-icon';labelIcon.textContent=isCplWifi?'♧':medium==='wifi'?'◉':'▦';
+      const heading=document.createElement('span');
+      heading.textContent=isCplWifi?'Réseau Wi-Fi CPL':isVelop?'Réseau Wi-Fi – '+d.name:medium==='wifi'?'Réseau Wi-Fi':medium==='cpl'?'Réseau CPL':'Équipements reliés';
+      const count=document.createElement('span');count.className='cluster-count';count.textContent=`(${descendants.length} appareil${descendants.length===1?'':'s'})`;
+      label.append(labelIcon,heading,count);children.appendChild(label);
     }
+    if(isCplWifi || isVelop || medium==='wifi'){
+      // Un groupe représente des clients du même parent, PAS une chaîne de
+      // connexions successives entre les appareils.
+      const tiles=document.createElement('div');tiles.className='tiles';
+      for(const child of descendants)tiles.appendChild(this._renderLeaf(child));
+      children.appendChild(tiles);
+    }else{
+      children.appendChild(this._renderForest(d.children));
+    }
+    wrapper.appendChild(children);
     return wrapper;
   }
   _select(device){

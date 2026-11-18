@@ -4,17 +4,17 @@
 [![HACS](https://img.shields.io/badge/HACS-d%C3%A9p%C3%B4t%20personnalis%C3%A9-41BDF5)](https://www.hacs.xyz/)
 ![Statut](https://img.shields.io/badge/statut-d%C3%A9veloppement-orange)
 
-**Version de développement 0.6.0 — ni stable ni validée sur toutes les configurations de Livebox 7.**
+**Version de développement 0.7.1 — non publiée en release GitHub et non encore validée sur une Livebox 7 réelle.**
 
-Cette intégration fournit une **carte Lovelace** pour représenter les équipements réseau visibles dans Home Assistant. Elle affiche les interfaces de la Livebox, les équipements intermédiaires reconnus et leurs enfants lorsque des liens sont disponibles. Les appareils sont organisés automatiquement : **pas de placement manuel des bulles**.
+Cette intégration fournit une **carte Lovelace** pour représenter les équipements réseau visibles dans Home Assistant. Elle affiche les interfaces de la Livebox, les équipements intermédiaires reconnus et leurs enfants lorsque des liens sont disponibles. Les appareils sont organisés automatiquement : **pas de placement manuel des bulles**. Les sous-réseaux sont présentés dans des encadrés colorés, sans transformer artificiellement les clients en une chaîne de connexions.
 
 ## Aperçu (noms entièrement fictifs)
 
-![Capture de démonstration fictive de Livebox Réseau, interfaces ETH0 à ETH4 ouvertes, switch, points d'accès Wi-Fi et sous-branches CPL](assets/topologie-exemple-fictif.png)
+![Capture de démonstration fictive de Livebox Réseau, interfaces ETH0 à ETH4 ouvertes, switch, points d'accès Wi-Fi et groupe CPL violet](assets/topologie-exemple-fictif.png)
 
-*Capture du rendu de la carte v0.6.0 dans un navigateur de test, alimentée par **21 appareils et une arborescence `Children` simulés**. Tous les noms sont génériques (« NAS », « PC », « CPL maître », « CPL secondaire », « Capteur jardin »…), toutes les adresses sont réservées à la documentation (`192.0.2.0/24`). **Aucune donnée provenant d'un réseau personnel n'est utilisée.** Les liens CPL et Wi-Fi illustrés sont fictifs ; ils ne sont pas une preuve de branchements réels.*
+*Capture du rendu de la carte v0.7.1 dans un navigateur de test, alimentée par **25 entités et une arborescence `Children` simulées**. Tous les noms sont génériques (« NAS », « Serveur », « CPL maître », « CPL Wi-Fi », « Capteur jardin »…), toutes les adresses sont réservées à la documentation (`192.0.2.0/24`). **Aucune donnée provenant d'un réseau personnel n'est utilisée.** Les liens CPL et Wi-Fi illustrés sont fictifs ; ils ne sont pas une preuve de branchements réels.*
 
-Sur PC, **toutes les interfaces sont déployées au départ**. Sur téléphone, les interfaces sont **repliées au départ** pour limiter le défilement. Les boutons **Tout déployer** et **Tout replier** permettent de modifier cet affichage ; les branches restent consultables individuellement.
+Sur PC, **toutes les interfaces sont déployées au départ**. Les 25 entités de l’exemple ne produisent que **24 bulles physiques**, car le réseau `CPL Wi-Fi_2.4` est fusionné avec son adaptateur CPL. Sur téléphone, les interfaces sont **repliées au départ** pour limiter le défilement. Les boutons **Tout déployer** et **Tout replier** permettent de modifier cet affichage ; les branches restent consultables individuellement.
 
 ## Dépendance obligatoire
 
@@ -24,20 +24,35 @@ Cette dépendance n'est **pas installée automatiquement** par HACS avec Livebox
 
 Pour importer les liens, le composant cherche à réutiliser la session authentifiée de cette intégration Orange et son API interne `TopologyDiagnostics`. **La compatibilité dépend de la version installée de l'intégration Orange et du firmware Livebox.**
 
-## Fonctionnalités de la version 0.6.0
+## Correctif 0.7.1
+
+Les raccords du graphe sont dessinés en courbes SVG recalculées après un déploiement/repli et lors du redimensionnement. Le tronc bleu s’arrête désormais à la première et à la dernière interface, sans dépassement. Le correctif ne change aucun lien `Children` ni réglage enregistré.
+
+## Fonctionnalités de la version 0.7.1
 
 | Fonction | Comportement réel |
 | --- | --- |
 | Inventaire | Lit les `device_tracker` Home Assistant possédant `source_type: router` et les attributs réseau attendus. Le code ne vérifie pas formellement l'intégration d'origine de chaque tracker. |
 | État des appareils | Affiche le nom, l'IP quand elle est connue et le statut `home` / `not_home`. |
 | Topologie automatique | Tente d'extraire les relations `Children` de `TopologyDiagnostics`, puis rapproche les équipements des trackers par **MAC** et cohérence de branche. Les intermédiaires inconnus ne sont pas inventés par un simple scan IP. |
-| Présentation | Livebox → interfaces ETH/Wi-Fi → équipements et sous-branches ; compactes, sans traits libres qui se chevauchent. Tous les ETH peuvent être ouverts simultanément. |
-| Switchs / CPL / points d'accès | Peuvent apparaître comme **nœuds parents** lorsqu'ils sont présents dans les données et qu'un lien exploitable est reconnu. La reconnaissance matérielle n'est pas garantie. |
+| Présentation | Livebox → interfaces ETH/Wi-Fi → équipements et sous-branches. Les groupes **Wi-Fi sont encadrés en vert**, le groupe **CPL Wi-Fi en violet**, et les branches Ethernet en bleu. Tous les ETH peuvent être ouverts simultanément. |
+| Switchs / CPL / points d'accès | Peuvent apparaître comme **nœuds parents** lorsqu'un lien exploitable est reconnu. `CPL Spare1` et `CPL Spare1_2.4` peuvent être fusionnés visuellement sans perte de l'IP ni de leurs descendants. La reconnaissance matérielle n'est pas garantie. |
 | Navigation | Recherche, filtres, clic sur un appareil, **Tout déployer / Tout replier**, affichage adapté au téléphone. Il n'y a **pas de déplacement individuel des bulles** ni de zoom global dans cette nouvelle présentation. |
 | Personnalisation | Possibilité de corriger le nom, l'interface, le parent, le type de liaison ou de masquer un équipement, depuis sa fiche dans la carte. Les corrections passent avant les liens importés. |
 | Stockage PC / mobile | Corrections enregistrées côté Home Assistant, dans `.storage/livebox_reseau_map`, puis partagées par WebSocket entre les écrans connectés. Aucun export YAML n'est requis après chaque correction. |
 | Éditeur Lovelace | Éditeur visuel pour le titre, le nom/IP affichés du routeur et les options de regroupement héritées des versions précédentes. |
 | Diagnostic | JSON à copier présentant les relations parent/enfant, en remplaçant les identifiants par `N1`, `N2`… et en retirant les IP et MAC. **Les noms des appareils restent visibles dans le diagnostic.** |
+
+
+### Groupes colorés dans la v0.7.1
+
+- **Bleu** : Livebox et interfaces Ethernet. Une interface identique ne garantit pas un câble direct.
+- **Vert** : point d’accès Wi-Fi **à gauche du groupe**, et clients Wi-Fi dans un encadré fermé à droite. Le mode pont des Velop n’est pas détecté de manière fiable par la Livebox ; la règle locale d’association reste distincte de `Children`.
+- **Violet** : depuis le **CPL maître**, un **CPL Wi-Fi** violet à gauche et ses clients dans le cadre fermé « Réseau Wi-Fi CPL ». Les clients sont présentés en grille et non comme une chaîne de liens physiques.
+
+**Fusion CPL Wi-Fi** : si deux entités de la même branche portent des noms compatibles, par exemple `CPL Spare1` et `CPL Spare1_2.4`, la carte n’affiche qu’une seule bulle `CPL Spare1`. Son adresse IP visible vient de `CPL Spare1_2.4` lorsqu’elle est disponible. Les enfants `Children` de la seconde entité sont conservés, tout comme sa présence dans les données HA. Les entités Home Assistant restent inchangées. Aucun regroupement entre interfaces ETH différentes n’est forcé.
+
+Les nombres indiqués dans les en-têtes ETH correspondent aux **entités suivies** ; après fusion, le nombre de bulles physiques peut être légèrement inférieur. Les effectifs des encadrés sont calculés sur les descendants affichés, jamais codés en dur.
 
 ### Les liens ne sont pas tous équivalents
 
@@ -54,7 +69,7 @@ Les points d'accès **Linksys Velop en mode pont** peuvent être représentés p
 2. Dans HACS, ajoutez `https://github.com/Stitchou/livebox-reseau` comme **dépôt personnalisé**, catégorie **Intégration**, puis installez Livebox Réseau.
 3. Redémarrez **Home Assistant Core** (y compris après la première installation, même si HACS n'affiche pas ce bouton).
 4. Dans **Paramètres → Appareils et services → Ajouter une intégration**, ajoutez **Livebox Réseau**. Aucun identifiant Livebox supplémentaire n'est demandé.
-5. Dans **Paramètres → Tableaux de bord → Ressources**, vérifiez qu'une ressource de type **Module JavaScript** pointe vers `/livebox-reseau/livebox-topologie-card.js?v=0.6.0`. Le composant tente de la créer automatiquement en mode de ressources Lovelace « stockage » ; ajoutez-la manuellement si nécessaire.
+5. Dans **Paramètres → Tableaux de bord → Ressources**, vérifiez qu'une ressource de type **Module JavaScript** pointe vers `/livebox-reseau/livebox-topologie-card.js?v=0.7.1`. Le composant tente de la créer automatiquement en mode de ressources Lovelace « stockage » ; ajoutez-la manuellement si nécessaire.
 6. Actualisez le navigateur (`Ctrl + Maj + R` dans Firefox), puis ajoutez la carte au tableau de bord.
 
 La carte peut être ajoutée depuis l'éditeur visuel Lovelace. Configuration YAML minimale :
@@ -71,9 +86,9 @@ grid_options:
 
 `router_name` et `router_ip` ne servent qu'à **l'affichage**. Ils ne configurent pas la connexion à la box.
 
-### Mise à jour depuis la v0.5.0
+### Mise à jour depuis les v0.5.0 / v0.6.0
 
-Mettez à jour le contenu du dépôt, puis **Télécharger à nouveau** dans HACS. Redémarrez Home Assistant Core pour mettre à jour le composant Python, actualisez le navigateur et vérifiez le paramètre `?v=0.6.0` sur la ressource.
+Mettez à jour le contenu du dépôt, puis **Télécharger à nouveau** dans HACS. Redémarrez Home Assistant Core pour mettre à jour le composant Python, actualisez le navigateur et vérifiez le paramètre `?v=0.7.1` sur la ressource.
 
 **Ne supprimez ni l'intégration Orange ni `.storage/livebox_reseau_map`** : le stockage des corrections reste compatible. Vous n'avez pas besoin de recréer vos cartes existantes `custom:livebox-topologie-card`.
 
@@ -94,10 +109,11 @@ python -m compileall -q custom_components/livebox_reseau
 node --check custom_components/livebox_reseau/frontend/livebox-topologie-card.js
 pytest -q tests/test_backend.py tests/test_topology.py
 node tests/test_grid_options.cjs
-python tests/test_v06_ui.py
+node tests/test_v07_logic.cjs
+python tests/test_v07_ui.py
 ```
 
-Le dernier test prend les captures fictives PC et mobile, vérifie l'ouverture des cinq branches ETH, la sous-branche **CPL maître → CPL secondaire**, les clics, les boutons « Tout déployer / Tout replier » et l'absence de débordement horizontal à 375 px.
+Le dernier test produit des captures fictives PC et mobile et vérifie les cinq branches ETH, la fusion **CPL Wi-Fi + interface 2,4 GHz** avec son IP héritée, un cadre violet contenant quatre clients, deux groupes Wi-Fi verts, les clics, les boutons « Tout déployer / Tout replier » et l'absence de débordement horizontal à 375 px.
 
 **Les résultats de simulation ne valent pas validation en production** : la collecte des liens et la pertinence de l'arbre sur une véritable Livebox 7 restent à confirmer, notamment pour les switchs mal identifiés, les CPL et les points d'accès en mode pont.
 

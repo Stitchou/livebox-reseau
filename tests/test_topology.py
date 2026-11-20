@@ -38,3 +38,21 @@ def test_invalid_and_limits():
     raw={'Name':'r','Children':[{'Name':'A','Key':'same'},{'Name':'B','Key':'same'}]}
     out=m.normalise_topology(raw)['nodes']
     assert len({x['id'] for x in out})==3
+
+
+def test_device_type_homeplug_is_not_a_name_heuristic():
+    raw={'status':[{'Key':'root','Name':'Routeur','Children':[
+        {'Key':'02:00:00:00:00:15','Name':'Device-2536','DeviceType':'HomePlug',
+         'InterfaceName':'ETH3','Active':True,'Children':[
+           {'Key':'02:00:00:00:00:16','Name':'Point exterieur','DeviceType':'Access Point'}]},
+        {'Key':'02:00:00:00:00:17','Name':'Adaptateur Wi-Fi','DeviceType':'HomePlug'}]}]}
+    data=m.normalise_topology(raw)
+    plug=next(n for n in data['nodes'] if n['name']=='Device-2536')
+    assert plug['kind']=='cpl' and plug['device_type']=='HomePlug'
+    assert plug['mac']=='02:00:00:00:00:15'
+    assert plug['interface_name']=='ETH3'
+    assert next(n for n in data['nodes'] if n['name']=='Point exterieur')['parent']==plug['id']
+    inventory=m.normalise_inventory({'02:00:00:00:00:15':{'Name':'Device-2536','DeviceType':'HomePlug',
+        'InterfaceName':'ETH3','Active':True,'IPAddress':'192.0.2.15','Password':'TOP_SECRET'}})
+    assert inventory[0]['device_type']=='HomePlug' and inventory[0]['active'] is True
+    assert 'TOP_SECRET' not in str(inventory)

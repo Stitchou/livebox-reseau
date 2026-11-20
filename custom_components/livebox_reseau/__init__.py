@@ -18,7 +18,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
 from homeassistant.helpers.storage import Store
-from .topology import normalise_topology
+from .topology import normalise_topology, normalise_inventory
 
 DOMAIN = "livebox_reseau"
 STORAGE_VERSION = 1
@@ -28,8 +28,9 @@ LINKS = {"wifi", "ethernet", "cpl", "other"}
 _LOGGER = logging.getLogger(__name__)
 FRONTEND_PATH = Path(__file__).parent / "frontend"
 URL_BASE = "/livebox-reseau"
-RESOURCE_URL = URL_BASE + "/livebox-topologie-card.js?v=0.7.2"
+RESOURCE_URL = URL_BASE + "/livebox-topologie-card.js?v=0.7.4"
 TOPOLOGY_CACHE_SECONDS = 900
+TOPOLOGY_FORCE_MIN_SECONDS = 45
 
 
 
@@ -232,14 +233,17 @@ def websocket_subscribe(hass, connection, msg):
     connection.send_result(msg["id"])
 
 
-@websocket_api.websocket_command({vol.Required("type"): "livebox_reseau/topology"})
+@websocket_api.websocket_command({
+    vol.Required("type"): "livebox_reseau/topology",
+    vol.Optional("refresh", default=False): bool,
+})
 @websocket_api.async_response
 async def websocket_topology(hass, connection, msg):
     """Lit la topologie sur l'API déjà authentifiée d'Orange Livebox.
 
-    Lecture de diagnostic uniquement, jamais de modifications réseau. Cache de
-    15 min partagé entre tous les dashboards ; n'enregistre pas le JSON dans
-    Recorder ou dans le stockage de l'intégration.
+    Lecture seule, cache 15 min partagé, rafraîchissement explicite limité
+    à une fois toutes les 45 secondes. L'inventaire est filtré sur liste blanche,
+    sans stockage permanent ni écriture dans Recorder.
     """
     if DOMAIN not in hass.data:
         connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "Intégration non chargée")
@@ -248,7 +252,11 @@ async def websocket_topology(hass, connection, msg):
     async with state["topology_lock"]:
         now = time.monotonic()
         previous = state["topology_cached"]
-        if previous is not None and now - state["topology_cached_at"] < TOPOLOGY_CACHE_SECONDS:
+        age = now - state["topology_cached_at"]
+        refresh = msg.get("refresh", False)
+        if previous is not None and age < (
+            TOPOLOGY_FORCE_MIN_SECONDS if refresh else TOPOLOGY_CACHE_SECONDS
+        ):
             connection.send_result(msg["id"], previous)
             return
         entries = hass.config_entries.async_entries("livebox")
@@ -269,6 +277,11 @@ async def websocket_topology(hass, connection, msg):
                 "Timeout": 30, "LLTDIcon": False, "SendXmlFile": False,
             }), timeout=48)
             parsed = normalise_topology(response)
+            inventory = getattr(coordinator, "data", {}) or {}
+            if isinstance(inventory, dict):
+                parsed["devices"] = normalise_inventory(inventory.get("devices", {}))
+            else:
+                parsed["devices"] = []
             if parsed["count"] <= 1:
                 raise ValueError("La Livebox n'a pas renvoyé d'arbre détaillé")
             state["topology_cached"] = parsed

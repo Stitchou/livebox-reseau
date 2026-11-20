@@ -28,19 +28,48 @@ def _mac(value: Any) -> str:
 
 
 def _kind(node: dict) -> str:
+    """DeviceType est la classification officielle d'Orange, pas le nom."""
+    device_type = _text(node.get("DeviceType") or node.get("Type"), 80).casefold()
+    if device_type == "homeplug":
+        return "cpl"
+    if device_type == "extenderwifiplus":
+        return "repeater"
+    if device_type in ("switch", "switch4", "switch8"):
+        return "switch"
+    if device_type in ("access point", "wireless access point"):
+        return "access_point"
     tags = node.get("Tags", [])
     tags = " ".join(tags) if isinstance(tags, list) else str(tags or "")
-    name = _text(node.get("Name", ""), 80).lower()
     ssw = node.get("SSW", {})
     if isinstance(ssw, dict) and ssw.get("CurrentMode") == "Slave":
         return "repeater"
-    if "wifi_bridge" in tags.lower():
+    if "wifi_bridge" in tags.casefold():
         return "bridge"
-    if any(x in name for x in ("switch", "commutateur")):
-        return "switch"
-    if any(x in name for x in ("cpl", "powerline", "tp-link")):
-        return "cpl"
     return "device"
+
+
+def normalise_inventory(devices: Any) -> list[dict[str, Any]]:
+    """Extrait une liste blanche de l'inventaire Orange même si trackers OFF."""
+    if not isinstance(devices, dict):
+        return []
+    out = []
+    used = set()
+    for key, obj in list(devices.items())[:450]:
+        if not isinstance(obj, dict):
+            continue
+        mac = _mac(obj.get("PhysAddress") or obj.get("MACAddress") or obj.get("Key") or key)
+        if not mac or mac in used:
+            continue
+        used.add(mac)
+        out.append({
+            "mac": mac,
+            "name": _text(obj.get("Name") or obj.get("FriendlyName"), 100),
+            "ip": _text(obj.get("IPAddress"), 55),
+            "interface_name": _text(obj.get("InterfaceName"), 48),
+            "device_type": _text(obj.get("DeviceType") or obj.get("Type"), 80),
+            "active": obj.get("Active") is True,
+        })
+    return out
 
 
 def normalise_topology(raw: Any) -> dict[str, Any]:
@@ -60,7 +89,7 @@ def normalise_topology(raw: Any) -> dict[str, Any]:
             return
         name = _text(obj.get("Name")) or _text(obj.get("FriendlyName"))
         key = _text(obj.get("Key"), 110)
-        mac = _mac(obj.get("PhysAddress") or obj.get("MACAddress"))
+        mac = _mac(obj.get("PhysAddress") or obj.get("MACAddress") or obj.get("Key"))
         children = obj.get("Children")
         children = children if isinstance(children, list) else []
         if not (key or mac or name or children):
@@ -89,6 +118,10 @@ def normalise_topology(raw: Any) -> dict[str, Any]:
             "name": name or ("Équipement réseau" if children else "Sans nom"),
             "parent": parent,
             "kind": kind,
+            "device_type": _text(obj.get("DeviceType") or obj.get("Type"), 80),
+            "interface_name": _text(obj.get("InterfaceName"), 48),
+            "ip": _text(obj.get("IPAddress"), 55),
+            "active": obj.get("Active") is True,
             "tags": safe_tags,
             "children_count": len(children),
         })

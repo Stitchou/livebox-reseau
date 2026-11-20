@@ -3,6 +3,7 @@ from pathlib import Path
 
 # Fausse API Home Assistant: teste le comportement du stockage sans HAOS réel.
 vol=types.ModuleType('probatio');vol.Required=lambda key:key
+vol.Optional=lambda key,default=None:key
 sys.modules['probatio']=vol
 ha=types.ModuleType('homeassistant');ha.__path__=[]
 comp=types.ModuleType('homeassistant.components');comp.__path__=[]
@@ -90,15 +91,24 @@ async def main():
                     {'Key':'shelly','Name':'Capteur de test','PhysAddress':'02:00:00:00:00:02'}]}
             ]}]}
     topo_api=TopologyAPI()
-    coordinator=types.SimpleNamespace(api=types.SimpleNamespace(topologydiagnostics=topo_api))
+    coordinator=types.SimpleNamespace(api=types.SimpleNamespace(topologydiagnostics=topo_api),
+       data={'devices':{'02:00:00:00:00:15':{'Key':'02:00:00:00:00:15','Name':'Nouvel equipement',
+           'DeviceType':'HomePlug','Active':True,'InterfaceName':'ETH3','Password':'SECRET'}}})
     hass.config_entries=types.SimpleNamespace(async_entries=lambda domain:[types.SimpleNamespace(runtime_data=coordinator)] if domain=='livebox' else [])
     await m.websocket_topology(hass,conn,{'id':22,'type':'livebox_reseau/topology'})
     assert conn.last['count']==5
     assert topo_api.calls==1
     assert conn.last['nodes'][2]['parent']==conn.last['nodes'][1]['id']
+    assert conn.last['devices'][0]['device_type']=='HomePlug'
+    assert 'SECRET' not in repr(conn.last)
     await m.websocket_topology(hass,conn,{'id':23,'type':'livebox_reseau/topology'})
     assert topo_api.calls==1, 'Cache 15 minutes non appliqué'
     assert 'overrides' not in conn.last
+    await m.websocket_topology(hass,conn,{'id':24,'type':'livebox_reseau/topology','refresh':True})
+    assert topo_api.calls==1, 'Rafraîchissement sans limite sollicite trop la Livebox'
+    hass.data['livebox_reseau']['topology_cached_at']-=m.TOPOLOGY_FORCE_MIN_SECONDS+1
+    await m.websocket_topology(hass,conn,{'id':25,'type':'livebox_reseau/topology','refresh':True})
+    assert topo_api.calls==2, 'Rafraîchissement forcé attendu après 45 secondes'
     assert hass.data['livebox_reseau']['overrides']['mac:AA']['name']=='Point Wi-Fi'
     m.websocket_get(hass,conn,{'id':9})
     assert conn.last['overrides']['mac:AA']['name']=='Point Wi-Fi' and conn.last['revision']==4

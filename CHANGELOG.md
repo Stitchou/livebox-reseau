@@ -1,4 +1,4 @@
-## 0.7.4 (développement) — topologie Orange et clients Linksys fiables
+## 0.7.4 — topologie Orange et clients Linksys
 
 - Supprime les règles fixes par ETH et les listes figées de noms de Velop/clients.
 - Conserve les vrais parents déclarés par la Livebox via `TopologyDiagnostics → Children` ; les nœuds « Ethernet » sans identité ne deviennent pas des hubs artificiels.
@@ -9,7 +9,7 @@
 - Bouton Actualiser avec contournement du cache 15 min, limité à une lecture de topologie toutes les 45 secondes.
 - Compteurs CPL corrigés, liaisons SVG vers les HomePlug violettes, affichage responsive PC et mobile conservé.
 - Conservation de `.storage/livebox_reseau_map`, aucune modification de Recorder et aucune commande réseau destructive.
-- Tests Python, logique JavaScript et rendu Chromium sur données fictives ; validation réelle encore nécessaire.
+- Tests Python, logique JavaScript et rendu Chromium sur données fictives ; vérification visuelle sur Livebox 7 réelle après installation. Les cas multiradio CPL et second Cudy restent à confirmer.
 
 ## 0.7.3 (développement) — suivi automatique des ports et rattachements prudents
 

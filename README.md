@@ -2,9 +2,9 @@
 
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-int%C3%A9gration%20personnalis%C3%A9e-41BDF5)](https://www.home-assistant.io/)
 [![HACS](https://img.shields.io/badge/HACS-d%C3%A9p%C3%B4t%20personnalis%C3%A9-41BDF5)](https://www.hacs.xyz/)
-![Statut](https://img.shields.io/badge/v0.7.4-d%C3%A9veloppement-orange)
+![Version](https://img.shields.io/badge/version-v0.7.4-blue)
 
-**Version 0.7.4 de développement : tests automatiques et Chromium validés sur des données fictives ; pas encore validée sur la Livebox réelle.** Ne pas confondre avec la release GitHub stable 0.7.2.
+**Version 0.7.4 : testée sur Home Assistant avec une Livebox 7 réelle.** Les regroupements CPL `HomePlug`, les connexions Cudy et les clients Wi-Fi des Velop fournis par Linksys ont été contrôlés visuellement. Les cas non observés (par exemple une seconde radio CPL 5 GHz ou plusieurs nouveaux Cudy) restent à confirmer.
 
 Carte Lovelace affichant les ports de la Livebox, les équipements reliés et la hiérarchie des connexions. Les lignes sont tracées automatiquement : pas besoin de disposer les appareils un par un. Les personnalisations restent partagées entre PC et mobile dans `.storage/livebox_reseau_map`.
 
@@ -76,16 +76,15 @@ L'intégration lit également l'inventaire déjà présent dans le coordinateur 
 - Les préférences de nom, parent, groupe, masquage et type de lien sont sauvegardées dans HAOS et restent prioritaires sur les regroupements automatiques.
 - Aucun changement au recorder, à MariaDB, aux équipements réseau ou à la politique de purge de Home Assistant.
 
-## Installation pour test depuis `main`
+## Installation avec HACS
 
-1. Publier les fichiers du présent dépôt sur une branche de développement (par exemple `main` si c'est la seule branche disponible). **Ne pas publier de release 0.7.4 avant validation.**
-2. Dans **HACS → Livebox Réseau → Télécharger à nouveau**, choisir cette branche (et non la release `v0.7.2`).
-3. Redémarrer **Home Assistant Core** uniquement pour recharger le composant Python.
-4. Vérifier la ressource Lovelace : `/livebox-reseau/livebox-topologie-card.js?v=0.7.4`. En mode stockage, le composant l'actualise normalement automatiquement.
-5. Recharger le navigateur (`Ctrl + Maj + R`). Ouvrir la carte et cliquer sur **Tout déployer**.
-6. Contrôler la branche des CPL et les groupes Wi-Fi Velop par rapport aux interfaces Orange/Linksys réelles.
+1. Ajouter le dépôt GitHub `https://github.com/Stitchou/livebox-reseau` comme **intégration** personnalisée dans HACS si ce n'est pas déjà fait.
+2. Installer ou mettre à jour vers la release **`v0.7.4`**.
+3. Redémarrer uniquement **Home Assistant Core** pour recharger le code Python.
+4. Vérifier l'URL de la ressource Lovelace : `/livebox-reseau/livebox-topologie-card.js?v=0.7.4`.
+5. Recharger le navigateur (`Ctrl + Maj + R`) si l'ancienne carte est encore dans le cache.
 
-Les mises à jour ne suppriment pas `.storage/livebox_reseau_map` ; une sauvegarde HA reste recommandée avant une version de développement.
+Les mises à jour ne suppriment pas `.storage/livebox_reseau_map`. Une sauvegarde Home Assistant reste recommandée avant toute mise à jour.
 
 ## Validation et limites
 

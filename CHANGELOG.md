@@ -1,3 +1,21 @@
+## 0.7.6 — suppression du mapping manuel
+
+- Retire « ⚙ Configurer » de la fiche des appareils : seuls « Fiche HA » et la fermeture restent disponibles.
+- Supprime le formulaire de mapping manuel et le filtre « Masqués », qui dépendait de ce formulaire.
+- La hiérarchie Orange et les associations Linksys sont les seules sources utilisées pour la topologie ; les anciens `overrides` de HAOS ne modifient plus les noms, parents, groupes ou liaisons.
+- Préserve sans les effacer les anciens réglages dans `.storage/livebox_reseau_map` pour permettre un retour arrière.
+- Corrige l'URL de ressource Lovelace automatique vers `?v=0.7.6` (elle était restée en `0.7.4` dans le backend).
+- Aucun changement des algorithmes de regroupement CPL/Velop, des valeurs Recorder ou de la topologie source Orange.
+- Ajoute des tests de non-régression et un test de la fiche appareil sans bouton de configuration.
+
+## 0.7.5 (développement) — encadrement générique des descendants HomePlug
+
+- Corrige le rendu des CPL non TP-Link : un `HomePlug` avec des équipements ordinaires en descendants (notamment Cudy et clients) crée une zone violette « Équipements derrière CPL » même sans radios `_2.4` / `_5`.
+- Conserve exactement les parents/enfants Orange : le Cudy et ses voisins ne sont pas déclarés automatiquement clients Wi-Fi du Cudy.
+- Les CPL ne desservant que d'autres CPL conservent leurs liaisons directes sans cadre inutile.
+- Aucun changement des groupes TP-Link multiradio, des Velop Linksys, du stockage HAOS ou du backend Orange.
+- Tests Chromium PC/mobile et tests de non-régression v0.7.4 ; validation réelle du CPL_JARDIN confirmée le 27/11/2026.
+
 ## 0.7.4 — topologie Orange et clients Linksys
 
 - Supprime les règles fixes par ETH et les listes figées de noms de Velop/clients.

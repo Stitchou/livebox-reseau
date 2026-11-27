@@ -84,7 +84,8 @@ assert.equal(find(movedGroups,'CPL Master').groupKey,'eth:ETH4');
 assert.equal(find(movedGroups,'CPL Spare1_2.4').groupKey,'eth:ETH4');
 assert.equal(find(movedGroups,'AP1300-Outdoor1').groupKey,'eth:ETH4');
 const manual=tree(devices,{['mac:'+m(5)]:{group:'eth:ETH1'}},true,top,true,hass);
-assert.equal(find(manual,'AP1300-Outdoor1').parentId,null,'Branche personnalisée respectée');
+assert.equal(find(manual,'AP1300-Outdoor1').parentId,newPlug.entityId,'Ancien mapping manuel ignoré : relation Orange conservée');
+assert.equal(find(manual,'AP1300-Outdoor1').groupKey,'eth:ETH3','Ancienne correction ETH ignorée');
 // Deux radios => pas de répartition inventée des enfants directs.
 const devices5=[...devices,{...devices.find(x=>x.name==='CPL Spare1_2.4'),entityId:'device_tracker.spare_5',name:'CPL Spare1_5',mac:m(13)}];
 const top5={nodes:[...topologyNodes,{id:'radio5',name:'CPL Spare1_5',parent:'ethernetA',mac:m(13),kind:'device'}]};
